@@ -99,7 +99,8 @@ const subjectService = {
               teacherNameLong: subject.teacherNameLong,
               teacherNameShort: subject.teacherNameShort,
               teacherNameSubstitution: subject.teacherNameSubstitution ?? [],
-              createdAt: BigInt(Date.now())
+              createdAt: BigInt(Date.now()),
+              teamId: subject.teamId
             }
           });
         }
@@ -117,7 +118,8 @@ const subjectService = {
               teacherGender: subject.teacherGender,
               teacherNameLong: subject.teacherNameLong,
               teacherNameShort: subject.teacherNameShort,
-              teacherNameSubstitution: subject.teacherNameSubstitution ?? []
+              teacherNameSubstitution: subject.teacherNameSubstitution ?? [],
+              teamId: subject.teamId
             }
           });
 

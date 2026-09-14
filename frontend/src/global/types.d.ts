@@ -132,6 +132,7 @@ type SubjectData = {
   teacherNameLong: string;
   teacherNameShort: string;
   teacherNameSubstitution: string[] | null;
+  teamId: number;
 }[];
 
 // Substitutions

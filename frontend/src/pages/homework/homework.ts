@@ -440,7 +440,12 @@ async function renderSubjectList(): Promise<void> {
   const filterData = JSON.parse(localStorage.getItem("homeworkFilter") ?? "{}") ?? {};
   filterData.subject ??= {};
 
-  for (const subject of [...await subjectData(), {subjectId: -1, subjectNameLong: "Sonstiges"}]) {
+  const currentJoinedTeamsData = await joinedTeamsData();
+
+  for (const subject of [
+    ...(await subjectData()).filter(s => s.teamId === -1 || currentJoinedTeamsData.includes(s.teamId)),
+    {subjectId: -1, subjectNameLong: "Sonstiges"}
+  ]) {
     // Get the subject data
     const subjectId = subject.subjectId;
     const subjectName = subject.subjectNameLong;
@@ -480,7 +485,8 @@ async function renderTeamList(): Promise<void> {
   // Clear the select element in the manage homework modal
   $("#manage-homework-visibility-team-select").html('<option value="-1" disabled selected>Team</option>');
 
-  for (const team of (await teamsData())) {
+  const currentJoinedTeamsData = await joinedTeamsData();
+  for (const team of (await teamsData()).filter(t => currentJoinedTeamsData.includes(t.teamId))) {
     // Add the template for the select elements
     $("#manage-homework-visibility-team-select").append(`<option value="${team.teamId}">${escapeHTML(team.name)}</option>`);
   }

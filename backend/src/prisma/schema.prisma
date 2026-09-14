@@ -200,11 +200,13 @@ model Subjects {
   teacherNameLong         String
   teacherNameShort        String
   teacherNameSubstitution String[]
+  teamId                  Int
   createdAt               BigInt?
 
   Class                   Class    @relation(fields: [classId], references: [classId], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([classId])
+  @@index([teamId])
   @@map("subjects")
 }
 

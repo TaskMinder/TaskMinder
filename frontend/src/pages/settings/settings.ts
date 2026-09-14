@@ -427,6 +427,9 @@ async function renderSubjectList(): Promise<void> {
   function $changedTeacherSubstitution(id: number): JQuery<HTMLElement> {
     return $(`.subject-changed-teacher-substitution[data-id="${id}"]`);
   }
+  function $changedTeam(id: number): JQuery<HTMLElement> {
+    return $(`.subject-changed-team[data-id="${id}"]`);
+  }
   function $deleted(id: number): JQuery<HTMLElement> {
     return $(`.subject-deleted[data-id="${id}"]`);
   }
@@ -444,6 +447,8 @@ async function renderSubjectList(): Promise<void> {
 
   const currentSubjectData = await subjectData();
 
+  const teamOptions = (await teamsData()).map(t => `<option value="${t.teamId}">${escapeHTML(t.name)}</option>`).join("");
+
   let newSubjectsContent = $("<div></div>");
 
   for (const subject of currentSubjectData) {
@@ -454,6 +459,7 @@ async function renderSubjectList(): Promise<void> {
     const teacherNameShort = escapeHTML(subject.teacherNameShort);
     const subjectNameSubstitution = subject.subjectNameSubstitution?.toString() ?? "";
     const teacherNameSubstitution = subject.teacherNameSubstitution?.toString() ?? "";
+    const teamId = subject.teamId;
 
     const t = $cloneTemplate("#subject-template", { dataId: subjectId.toString(), disabled: !canEditClassSettings });
 
@@ -467,6 +473,9 @@ async function renderSubjectList(): Promise<void> {
     t.find(".subject-teacher-short-input").val(teacherNameShort).attr("placeholder", teacherNameShort);
     t.find(".subject-name-substitution-input").val(subjectNameSubstitution).attr("placeholder", subjectNameSubstitution);
     t.find(".subject-teacher-substitution-input").val(teacherNameSubstitution).attr("placeholder", teacherNameSubstitution);
+    t.find(".subject-team-input")
+      .html("<option value=\"-1\">Alle</option>" + teamOptions)
+      .val(teamId);
 
     t.find(".subject-changed-name-long-old").text(subjectNameLong);
     t.find(".subject-changed-name-short-old").text(subjectNameShort);
@@ -475,6 +484,7 @@ async function renderSubjectList(): Promise<void> {
     t.find(".subject-changed-teacher-short-old").text(teacherNameShort);
     t.find(".subject-changed-name-substitution-old").text(subjectNameSubstitution);
     t.find(".subject-changed-teacher-substitution-old").text(teacherNameSubstitution);
+    t.find(".subject-changed-team-old").text((await teamsData()).find(t => t.teamId === teamId)?.name ?? "Alle");
 
     newSubjectsContent.append(t);
   }
@@ -640,6 +650,25 @@ async function renderSubjectList(): Promise<void> {
       }
     });
 
+  $("#app").off("input", ".subject-team-input")
+    .on("input", ".subject-team-input", async function () {
+      changedAnything();
+
+      const newVal = $(this).val();
+
+      const id = $(this).data("id");
+      if (id !== "") {
+        const oldVal = currentSubjectData.find(subject => subject.subjectId === id)?.teamId;
+        if (newVal === oldVal) {
+          $changedTeam(id).hide();
+        }
+        else if (! $deleted(id).is(":visible")) {
+          $changedTeam(id).show().find("b").text((await teamsData()).find(t => t.teamId === Number.parseInt(newVal))?.name ?? "Alle");
+        }
+        toggleChangesContainer(id);
+      }
+    });
+
   $(".subject-delete").on("click", function () {
     changedAnything();
 
@@ -676,6 +705,7 @@ async function renderSubjectList(): Promise<void> {
 async function renderTimetable(): Promise<void> {
   const newTimetableContent = $("<div></div>");
 
+  const currentJoinedTeamsData = await joinedTeamsData()
   const subjectOptions = (await subjectData()).map(s => `<option value="${s.subjectId}">${escapeHTML(s.subjectNameLong)}</option>`).join("");
   $("#lesson-template .timetable-subject-select")
     .html("<option value=\"\" disabled>Fach</option><option value=\"-1\">Pause</option>" + subjectOptions);
@@ -1449,7 +1479,7 @@ export async function init(): Promise<void> {
     });
 
     $("#set-logged-out-users-role-confirm").on("click", async () => {
-      const ajaxPromise = ajax("PATCH", "/api/classes/1/default-permission", {
+      const ajaxPromise = ajax("PATCH", `/api/classes/${user.classId}/default-permission`, {
         body: { role: Number.parseInt($("#set-logged-out-users-role-select option:selected").val()?.toString() ?? "0") },
         queueable: true
       });
@@ -1738,7 +1768,7 @@ export async function init(): Promise<void> {
 
     $("#subjects-wrapper").hide();
 
-    $("#new-subject").on("click", () => {
+    $("#new-subject").on("click", async () => {
       $("#subjects-cancel").show();
       unsavedChanges(true);
       $("#subjects-save-confirm-container, #subjects-save-confirm").hide();
@@ -1754,6 +1784,8 @@ export async function init(): Promise<void> {
       t.find(".subject-teacher-short-input").attr("placeholder", "Kürzel");
       t.find(".subject-name-substitution-input").attr("placeholder", "Vertr.-Fachname");
       t.find(".subject-teacher-substitution-input").attr("placeholder", "Vertr.-Lehrkraftname");
+      const teamOptions = (await teamsData()).map(t => `<option value="${t.teamId}">${escapeHTML(t.name)}</option>`).join("");
+      t.find(".subject-team-input").html("<option value=\"-1\">Alle</option>" + teamOptions);
 
       t.find(".subject-changes").html("<div class=\"text-success fw-bold text-nowrap\" data-id=\"\">Neu</div>");
       t.find(".subject-delete").removeClass("subject-delete").addClass("new-subject-delete");
@@ -1803,7 +1835,8 @@ export async function init(): Promise<void> {
           teacherNameLong: $(this).find(".subject-teacher-long-input").val()?.toString() ?? "",
           teacherNameShort: $(this).find(".subject-teacher-short-input").val()?.toString() ?? "",
           subjectNameSubstitution: $(this).find(".subject-name-substitution-input").val()?.toString()?.split(",").map(v => v.trim()) ?? [],
-          teacherNameSubstitution: $(this).find(".subject-teacher-substitution-input").val()?.toString()?.split(",").map(v => v.trim()) ?? []
+          teacherNameSubstitution: $(this).find(".subject-teacher-substitution-input").val()?.toString()?.split(",").map(v => v.trim()) ?? [],
+          teamId: Number.parseInt($(this).find(".subject-team-input").val()?.toString() ?? "-1")
         });
       });
 
