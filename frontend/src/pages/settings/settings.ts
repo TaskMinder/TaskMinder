@@ -654,7 +654,7 @@ async function renderSubjectList(): Promise<void> {
     .on("input", ".subject-team-input", async function () {
       changedAnything();
 
-      const newVal = $(this).val();
+      const newVal = Number.parseInt($(this).val());
 
       const id = $(this).data("id");
       if (id !== "") {
@@ -663,7 +663,7 @@ async function renderSubjectList(): Promise<void> {
           $changedTeam(id).hide();
         }
         else if (! $deleted(id).is(":visible")) {
-          $changedTeam(id).show().find("b").text((await teamsData()).find(t => t.teamId === Number.parseInt(newVal))?.name ?? "Alle");
+          $changedTeam(id).show().find("b").text((await teamsData()).find(t => t.teamId === newVal)?.name ?? "Alle");
         }
         toggleChangesContainer(id);
       }
@@ -749,6 +749,18 @@ async function renderTimetable(): Promise<void> {
   $("#app").off("input", ".lesson input, .lesson select").on("input", ".lesson input, .lesson select", () => {
     $("#timetable-cancel").show();
     unsavedChanges(true);
+  });
+
+  $("#app").off("change", ".lesson-subject-select").on("change", ".lesson-subject-select", function () {
+    const thisLesson = $(this).closest(".lesson");
+    const subjectId = Number.parseInt($(this).val());
+    const subjectTeamId = currentSubjectData.find(s => s.subjectId === subjectId)?.teamId ?? -1
+    if (subjectTeamId === -1) {
+      thisLesson.find(".lesson-team-select").removeClass("is-autocompleted").val(-1).prop("disabled", false);
+    }
+    else {
+      thisLesson.find(".lesson-team-select").addClass("is-autocompleted").val(subjectTeamId!).prop("disabled", true);
+    }
   });
 
   $("#app").off("input autocomplete", ".lesson-number").on("input autocomplete", ".lesson-number", function () {
