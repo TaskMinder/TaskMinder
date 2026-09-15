@@ -705,8 +705,16 @@ async function renderSubjectList(): Promise<void> {
 async function renderTimetable(): Promise<void> {
   const newTimetableContent = $("<div></div>");
 
-  const currentJoinedTeamsData = await joinedTeamsData()
-  const subjectOptions = (await subjectData()).map(s => `<option value="${s.subjectId}">${escapeHTML(s.subjectNameLong)}</option>`).join("");
+  const currentSubjectData = (await subjectData())
+  const subjectSameNameCounts = new Map<string, number>()
+  currentSubjectData.forEach(s => subjectSameNameCounts.set(s.subjectNameLong, (subjectSameNameCounts.get(s.subjectNameLong) ?? 0) + 1))
+  const subjectOptions = currentSubjectData
+    .map(s => [s.subjectId, (subjectSameNameCounts.get(s.subjectNameLong) ?? 0) > 1
+      ? `${s.subjectNameLong} (bei ${s.teacherNameLong})`
+      : s.subjectNameLong]
+    )
+    .map(([subjectId, name]) => `<option value="${subjectId}">${escapeHTML(name.toString())}</option>`)
+    .join("");
   $("#lesson-template .timetable-subject-select")
     .html("<option value=\"\" disabled>Fach</option><option value=\"-1\">Pause</option>" + subjectOptions);
   const teamOptions = (await teamsData()).map(t => `<option value="${t.teamId}">${escapeHTML(t.name)}</option>`).join("");
