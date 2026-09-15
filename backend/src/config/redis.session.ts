@@ -1,6 +1,7 @@
 import session from "express-session";
 import type { SessionData } from "express-session";
 import logger from "./logger.js";
+import { BigIntreplacer } from "../utils/validate.functions.js";
 
 export const sessionTTLSeconds = 30 * 24 * 60 * 60; // 30 days
 
@@ -106,7 +107,7 @@ export class RedisStore extends session.Store {
       }
       await this.client.set(
         sessionKey,
-        JSON.stringify(sess),
+        JSON.stringify(sess, BigIntreplacer),
         { EX: ttl }
       );
       // Maintain reverse index if session is associated with a class

@@ -433,7 +433,7 @@ export async function loadTimetableData(date: Date): Promise<TimetableData[]> {
   await joinedTeamsData.init(); await subjectData.init(); await lessonData.init(); await classSubstitutionsData.init(); await eventData.init();
 
   const currentJoinedTeamsData = await joinedTeamsData();
-  const currentSubjectData = await subjectData();
+  const currentSubjectData = (await subjectData()).filter(s => s.teamId === -1 || currentJoinedTeamsData.includes(s.teamId));
   const currentLessonData = await lessonData();
   const currentSubstitutionsData = await classSubstitutionsData();
   const currentEventData = await eventData();
@@ -1577,7 +1577,7 @@ export async function init(): Promise<void> {
 
   const searchParams = new URLSearchParams(location.search);
   if (searchParams.has("legacy_origin")) {
-    $("#legacy-origin-toast").addClass("show");
+    $("#legacy-origin-toast").toast("show");
     searchParams.delete("legacy_origin");
     const newUrl = new URL(location.href);
     newUrl.search = searchParams.toString();

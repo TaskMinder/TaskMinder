@@ -25,6 +25,7 @@ import {
 import { initializeUploadWorkerServices, startUploadWorker } from "./utils/upload.process.worker.js";
 import { cleanupStaleUploadFiles } from "./utils/upload.cleanup.js";
 import { envConfig } from "./config/env.js";
+import { BigIntreplacer } from "./utils/validate.functions.js";
 import { prefetchSubstitutionDataForAllClasses } from "./services/substitution.service.js";
 import checkAccess from "./middleware/access.middleware.js";
 import { ErrorHandler } from "./middleware/error.middleware.js";
@@ -54,6 +55,7 @@ const proxyHop = envConfig.proxyHop;
 
 const app = express();
 app.set("trust proxy", Number(proxyHop));
+app.set("json replacer", BigIntreplacer);
 const server = createServer(app);
 
 app.use((req, res, next) => {

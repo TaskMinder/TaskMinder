@@ -714,6 +714,8 @@
                           Standardmäßig das Lehrkraftkürzel, nach dieser Lehrkraft werden Vertretungen gefiltert, mehrere Möglichkeiten können durch
                           "," getrennt werden
                         </div>
+                        <b>Team:</b>
+                        Team, dem das Fach angezeigt wird
                       </div>
                     </div>
                   </div>
@@ -803,6 +805,14 @@
                               />
                             </label>
                           </div>
+                          <div class="d-flex flex-column flex-lg-row gap-1 gap-lg-2 align-items-lg-center">
+                            <b>Team</b>
+                            <label class="d-flex align-items-center gap-1 flex-grow-1 justify-content-between">
+                              Team
+                              <select class="form-select form-select-sm subject-team-input w-50 w-lg-100" data-id disabled>
+                              </select>
+                            </label>
+                          </div>
                         </div>
                         <div class="subject-changes mt-2 mt-xl-0 ms-xl-2 word-wrap-anywhere" data-id>
                           <div class="text-warning fw-bold me-2 subject-changed-name-long" data-id>
@@ -852,6 +862,13 @@
                             <!-- prettier-ignore -->
                             <span class="text-secondary fw-normal" data-id>
                               (<span class="subject-changed-teacher-substitution-old"></span> zu <b></b>)
+                            </span>
+                          </div>
+                          <div class="text-warning fw-bold me-2 subject-changed-team" data-id>
+                            Team geändert
+                            <!-- prettier-ignore -->
+                            <span class="text-secondary fw-normal" data-id>
+                              (<span class="subject-changed-team-old"></span> zu <b></b>)
                             </span>
                           </div>
                           <div class="text-danger fw-bold subject-deleted" data-id>Gelöscht</div>

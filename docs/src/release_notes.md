@@ -4,6 +4,25 @@ All changes are grouped by type and the latest version appears first.
 
 ---
 
+## \[v2.3.1] - 2026-09-15
+
+### Added
+* feat(subject): allow class managers to assign subjects to all students or to a specific team
+
+### Fixed
+* fix(bigint): serialize BigInt values consistently in API responses and Redis payloads, regardless of cache state
+* fix(settings): update logged-out user permissions for the active class instead of a hard-coded class ID
+* fix(legacy): show the legacy-origin notice using the Bootstrap toast API
+
+### Changed
+* chore(subject): filter timetable and homework subject choices based on joined teams
+* chore(team): show only joined teams in event, homework, and upload selectors, and sort teams alphabetically
+* chore(timetable): include teacher names when duplicate subject names need to be distinguished
+* chore(landing): link app actions and legal pages to app.taskminder.de
+* chore(packages): bump packages
+
+---
+
 ## \[v2.3.0] - 2026-09-12
 
 ### Breaking Changes

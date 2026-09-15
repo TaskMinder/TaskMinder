@@ -125,7 +125,7 @@ export const disconnectRedis = async (): Promise<void> => {
 };
 
 export const queueJob = async (queueKey: string, jobData: unknown): Promise<void> => {
-  await redisClient.lPush(queueKey, JSON.stringify(jobData));
+  await redisClient.lPush(queueKey, JSON.stringify(jobData, BigIntreplacer));
 };
 
 export const dequeueJob = async (queueKey: string): Promise<unknown | null> => {

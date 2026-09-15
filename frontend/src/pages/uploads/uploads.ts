@@ -346,7 +346,8 @@ async function renderTeamList(): Promise<void> {
   // Clear the select element in the manage upload modal
   $("#manage-upload-visibility-team-select, #add-upload-request-visibility-team-select").html('<option value="-1" disabled selected>Team</option>');
 
-  for (const team of (await teamsData())) {
+  const currentJoinedTeamsData = await joinedTeamsData();
+  for (const team of (await teamsData()).filter(t => currentJoinedTeamsData.includes(t.teamId))) {
     // Add the template for the select elements
     $("#manage-upload-visibility-team-select, #add-upload-request-visibility-team-select")
       .append(`<option value="${team.teamId}">${escapeHTML(team.name)}</option>`);

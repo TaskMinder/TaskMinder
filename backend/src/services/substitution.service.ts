@@ -4,6 +4,7 @@ import iconv from "iconv-lite";
 import logger from "../config/logger.js";
 import { Session, SessionData } from "express-session";
 import { prisma } from "../config/prisma.js";
+import { BigIntreplacer } from "../utils/validate.functions.js";
 
 type SubstitutionData = {
   plan1: { substitutions: unknown; date: string };
@@ -105,7 +106,7 @@ export async function loadSubstitutionData(
       data: substitutionsResult,
       timestamp: Date.now()
     };
-    await redisClient.set(cacheKey, JSON.stringify(cachePayload), { expiration: { type: "EX", value: ttlSeconds } });
+    await redisClient.set(cacheKey, JSON.stringify(cachePayload, BigIntreplacer), { expiration: { type: "EX", value: ttlSeconds } });
     
     return substitutionsResult;
   } 

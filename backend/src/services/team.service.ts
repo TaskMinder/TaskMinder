@@ -30,6 +30,9 @@ const teamService = {
     const data = await prisma.team.findMany({
       where: {
         classId
+      },
+      orderBy: {
+        name: "asc"
       }
     });
 
