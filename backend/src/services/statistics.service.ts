@@ -1,6 +1,7 @@
 import { prisma } from "../config/prisma.js";
 import { redisClient, STATISTICS_CACHE_KEY, statisticsCacheExpiration } from "../config/redis.js";
 import logger from "../config/logger.js";
+import { BigIntreplacer } from "../utils/validate.functions.js";
 
 export type Statistics = {
   registeredClasses: number;
@@ -55,7 +56,7 @@ async function getStatistics(): Promise<Statistics> {
   };
 
   try {
-    await redisClient.set(STATISTICS_CACHE_KEY, JSON.stringify(statistics),
+    await redisClient.set(STATISTICS_CACHE_KEY, JSON.stringify(statistics, BigIntreplacer),
       { expiration: { type: "EX", value: statisticsCacheExpiration } });
   }
   catch (err) {

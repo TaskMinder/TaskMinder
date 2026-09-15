@@ -1,7 +1,7 @@
 import logger from "../config/logger.js";
 import { CACHE_KEY_PREFIXES, generateCacheKey, redisClient } from "../config/redis.js";
 import { prisma } from "../config/prisma.js";
-import { BigIntreplacer } from "../utils/validate.functions.js";
+import { BigIntreplacer, isValidTeamId } from "../utils/validate.functions.js";
 import { invalidateCache, updateCacheData } from "../config/redis.js";
 import { Session, SessionData } from "express-session";
 import { setSubjectsTypeBody } from "../schemas/subject.schema.js";
@@ -50,6 +50,9 @@ const subjectService = {
   ) {
     const { subjects } = reqData;
     const classId = parseInt(session.classId!, 10);
+
+    const teamIds = new Set(subjects.map(subject => subject.teamId));
+    await Promise.all([...teamIds].map(teamId => isValidTeamId(teamId, session)));
 
     const existingSubjects = await prisma.subjects.findMany({
       where: {

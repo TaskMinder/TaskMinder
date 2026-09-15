@@ -705,9 +705,9 @@ async function renderSubjectList(): Promise<void> {
 async function renderTimetable(): Promise<void> {
   const newTimetableContent = $("<div></div>");
 
-  const currentSubjectData = (await subjectData())
-  const subjectSameNameCounts = new Map<string, number>()
-  currentSubjectData.forEach(s => subjectSameNameCounts.set(s.subjectNameLong, (subjectSameNameCounts.get(s.subjectNameLong) ?? 0) + 1))
+  const currentSubjectData = (await subjectData());
+  const subjectSameNameCounts = new Map<string, number>();
+  currentSubjectData.forEach(s => subjectSameNameCounts.set(s.subjectNameLong, (subjectSameNameCounts.get(s.subjectNameLong) ?? 0) + 1));
   const subjectOptions = currentSubjectData
     .map(s => [s.subjectId, (subjectSameNameCounts.get(s.subjectNameLong) ?? 0) > 1
       ? `${s.subjectNameLong} (bei ${s.teacherNameLong})`
