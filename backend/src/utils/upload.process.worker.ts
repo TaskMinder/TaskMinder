@@ -268,10 +268,11 @@ const sanitizePDF = async (filePath: string): Promise<number> => {
   if (!gsCommand) return (await fs.stat(filePath)).size;
 
   const sanitizedPath = path.join(SANITIZED_DIR, `sanitized-${path.basename(filePath)}`);
+  const startedAt = Date.now();
 
   try {
     const gsArgs = [
-      "-dPDFA=1",
+      "-dPDFA=2",
       "-dBATCH",
       "-dNOPAUSE",
       "-dNOOUTERSAVE",
@@ -285,7 +286,8 @@ const sanitizePDF = async (filePath: string): Promise<number> => {
       "-dMonoImageResolution=600",
       // Improve JPEG quality from ebook default
       "-dJPEGQ=85",  // ebook uses ~75, printer uses ~90
-      "-sColorConversionStrategy=UseDeviceIndependentColor",
+      "-sColorConversionStrategy=RGB",
+      "-sBlendConversionStrategy=Simple",
       "-dEmbedAllFonts=true",
       "-dSubsetFonts=true",
       "-dPDFACompatibilityPolicy=1",
@@ -311,7 +313,18 @@ const sanitizePDF = async (filePath: string): Promise<number> => {
 
     return stats.size;
   }
-  catch {
+  catch (error) {
+    const processError = error as ExecException & {
+      stdout?: string;
+      stderr?: string;
+    };
+    logger.error("PDF sanitization failed", {
+      file: path.basename(filePath),
+      durationMs: Date.now() - startedAt,
+      errorMessage: processError.message,
+      errorCode: processError.code,
+      stderr: processError.stderr?.trim().slice(-4000)
+    });
     await fs.unlink(sanitizedPath).catch(() => { });
     const err: RequestError = {
       name: "Internal Server Error",

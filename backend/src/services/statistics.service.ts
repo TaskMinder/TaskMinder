@@ -34,17 +34,17 @@ async function getStatistics(): Promise<Statistics> {
     prisma.account.aggregate({
       _max: { accountId: true }
     }),
-    prisma.homework.count({
-      where: { Class: { isTestClass: false } }
+    prisma.homework.aggregate({
+      _max: { homeworkId: true }
     }),
-    prisma.event.count({
-      where: { Class: { isTestClass: false } }
+    prisma.event.aggregate({
+      _max: { eventId: true }
     })
   ]).then(([classes, accounts, homework, events]) => [
     classes,
     accounts._max.accountId ?? 0,
-    homework,
-    events
+    homework._max.homeworkId ?? 0,
+    events._max.eventId ?? 0
   ]);
 
   const statistics: Statistics = {

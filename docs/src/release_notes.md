@@ -4,6 +4,18 @@ All changes are grouped by type and the latest version appears first.
 
 ---
 
+## \[v2.3.2] - 2026-09-??
+
+### Fixed
+* fix(statistics): keep homework and event totals at their historical maximum after records are deleted
+* fix(homework): keep homework personal for logged-in members without edit permission, even when a lesson team is autoselected
+* fix(upload): improve PDF sanitization compatibility by converting uploads to PDF/A-2 with RGB blending
+
+### Changed
+* chore(upload): add detailed diagnostics when PDF sanitization fails
+
+---
+
 ## \[v2.3.1] - 2026-09-15
 
 ### Added

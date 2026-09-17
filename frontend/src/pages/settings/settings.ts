@@ -754,7 +754,7 @@ async function renderTimetable(): Promise<void> {
   $("#app").off("change", ".lesson-subject-select").on("change", ".lesson-subject-select", function () {
     const thisLesson = $(this).closest(".lesson");
     const subjectId = Number.parseInt($(this).val());
-    const subjectTeamId = currentSubjectData.find(s => s.subjectId === subjectId)?.teamId ?? -1
+    const subjectTeamId = currentSubjectData.find(s => s.subjectId === subjectId)?.teamId ?? -1;
     if (subjectTeamId === -1) {
       thisLesson.find(".lesson-team-select").removeClass("is-autocompleted").val(-1).prop("disabled", false);
     }
