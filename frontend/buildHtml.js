@@ -47,7 +47,7 @@ async function buildDirectory(src, dest) {
         <style id="event-type-styles"></style>
         <title>${titleMap[fileName]} · TaskMinder</title>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
         <script>
           document.addEventListener("DOMContentLoaded", () => {
             for (let pS of document.querySelectorAll(".preload-style")) {

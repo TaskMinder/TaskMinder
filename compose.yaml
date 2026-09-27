@@ -84,7 +84,7 @@ services:
       - redis-data:/data
 
   prometheus:
-    image: prom/prometheus:v3.14.0
+    image: prom/prometheus:v3.15.0
     container_name: prometheus
     restart: always
     volumes:
@@ -100,7 +100,7 @@ services:
       - app
 
   loki:
-    image: grafana/loki:3.7.7
+    image: grafana/loki:3.7.8
     container_name: loki
     restart: always
     volumes:
@@ -109,7 +109,7 @@ services:
     command: -config.file=/etc/loki/local-config.yaml
   
   alloy:
-    image: grafana/alloy:v1.19.2
+    image: grafana/alloy:v1.20.0
     container_name: alloy
     restart: always
     volumes:
@@ -127,7 +127,7 @@ services:
       - app
 
   grafana:
-    image: grafana/grafana:13.2.1
+    image: grafana/grafana:13.2.2
     container_name: grafana
     restart: always
     ports:

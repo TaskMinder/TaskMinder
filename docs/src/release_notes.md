@@ -8,11 +8,15 @@ All changes are grouped by type and the latest version appears first.
 
 ### Fixed
 * fix(statistics): keep homework and event totals at their historical maximum after records are deleted
-* fix(homework): keep homework personal for logged-in members without edit permission, even when a lesson team is autoselected
-* fix(upload): improve PDF sanitization compatibility by converting uploads to PDF/A-2 with RGB blending
+* fix(homework): personal homework for logged-in members without edit permission
+* fix(upload): convert uploads to PDF/A-2 with RGB blending to not exceed timeout
+* fix(offline): fall back safely when bootstrap metadata unavailable or missing from IndexedDB
+* fix(pwa): complete manifest metadata, correct theme color property
 
 ### Changed
-* chore(upload): add detailed diagnostics when PDF sanitization fails
+* chore(ui): device safe-area insets across app navigation
+* chore(upload): add diagnostics when PDF sanitization fails
+* chore(packages): bump packages
 
 ---
 

@@ -87,15 +87,21 @@ async function removeOutdatedCaches(version: string): Promise<void> {
 type Bootstrap = { maintenance: boolean, online: boolean, version: string, cacheEnabled: boolean, maintenanceHtml: string, classJoined: boolean }
 let bootstrap: Bootstrap | null = null;
 
+async function getCachedBootstrap(db: IDBDatabase): Promise<Bootstrap | undefined> {
+  const request = db.transaction("meta", "readonly").objectStore("meta").get("bootstrap");
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result as Bootstrap | undefined);
+    request.onerror = () => reject(request.error);
+  });
+}
+
 async function fetchBootstrap(): Promise<Bootstrap> {
   const db = await openIndexedDB();
   try {
     const res = await (await fetch("/bootstrap")).json() as Bootstrap;
     if (res.maintenance) {
-      const tx = db.transaction("meta", "readwrite").objectStore("meta").get("bootstrap");
-      res.version = (await new Promise(res => {
-        tx.onsuccess = () => res(tx.result);
-      }) as Bootstrap).version;
+      const cachedBootstrap = await getCachedBootstrap(db);
+      if (cachedBootstrap) res.version = cachedBootstrap.version;
     }
     res.online = true;
     db.transaction("meta", "readwrite").objectStore("meta").put(res, "bootstrap");
@@ -104,11 +110,15 @@ async function fetchBootstrap(): Promise<Bootstrap> {
     return res;
   }
   catch {
-    const tx = db.transaction("meta", "readwrite").objectStore("meta").get("bootstrap");
-    const res = await new Promise(res => {
-      tx.onsuccess = () => res(tx.result);
-    }) as Bootstrap;
-    res.online = false;
+    const cachedBootstrap = await getCachedBootstrap(db);
+    const res: Bootstrap = cachedBootstrap ? { ...cachedBootstrap, online: false } : {
+      maintenance: false,
+      online: false,
+      version: "offline",
+      cacheEnabled: false,
+      maintenanceHtml: "",
+      classJoined: false
+    };
     db.transaction("meta", "readwrite").objectStore("meta").put(res, "bootstrap");
     bootstrap = res;
     return res;
