@@ -6,6 +6,8 @@ import { updateCacheData, invalidateCache } from "../config/redis.js";
 import { Session, SessionData } from "express-session";
 import { setLessonDataTypeBody } from "../schemas/lesson.schema.js";
 import { emitSocketToClass, SOCKET_EVENTS } from "../config/socket.js";
+import { Prisma } from "../prisma/generated/prisma/client.js";
+import { RequestError } from "../@types/requestError.js";
 
 const lessonService = {
   async setLessonData(
@@ -41,29 +43,45 @@ const lessonService = {
           matching.endTime !== Number(existing.endTime);
       });
 
-    await prisma.$transaction(async tx => {
-      await tx.lesson.deleteMany({
-        where: {
-          classId
-        }
-      });
-
-      for (const lesson of lessons) {
-        await tx.lesson.create({
-          data: {
-            classId,
-            lessonNumber: lesson.lessonNumber,
-            weekDay: lesson.weekDay as 0 | 1 | 2 | 3 | 4,
-            teamId: lesson.teamId,
-            subjectId: lesson.subjectId,
-            room: lesson.room,
-            startTime: lesson.startTime,
-            endTime: lesson.endTime,
-            createdAt: BigInt(Date.now())
+    try {
+      await prisma.$transaction(async tx => {
+        await tx.lesson.deleteMany({
+          where: {
+            classId
           }
         });
+
+        for (const lesson of lessons) {
+          await tx.lesson.create({
+            data: {
+              classId,
+              lessonNumber: lesson.lessonNumber,
+              weekDay: lesson.weekDay as 0 | 1 | 2 | 3 | 4,
+              teamId: lesson.teamId,
+              subjectId: lesson.subjectId,
+              room: lesson.room,
+              startTime: lesson.startTime,
+              endTime: lesson.endTime,
+              createdAt: BigInt(Date.now())
+            }
+          });
+        }
+      });
+    } 
+    catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        const reqErr: RequestError = {
+          name: "Conflict",
+          status: 409,
+          message: "Duplicate lesson: two lessons share the same weekDay, lessonNumber, subjectId and teamId",
+          expected: true
+        };
+        throw reqErr;
       }
-    });
+      
+      logger.error(`setLessonData failed with unexpected database error: ${err}`);
+      throw err;
+    }
 
     if (dataChanged) {
       await invalidateCache(CACHE_KEY_PREFIXES.LESSON, classId.toString());

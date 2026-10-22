@@ -4,7 +4,7 @@ All changes are grouped by type and the latest version appears first.
 
 ---
 
-## \[v2.3.2] - 2026-09-??
+## \[v2.3.2] - 2026-10-??
 
 ### Fixed
 * fix(statistics): keep homework and event totals at their historical maximum after records are deleted
@@ -12,6 +12,8 @@ All changes are grouped by type and the latest version appears first.
 * fix(upload): convert uploads to PDF/A-2 with RGB blending to not exceed timeout
 * fix(offline): fall back safely when bootstrap metadata unavailable or missing from IndexedDB
 * fix(pwa): complete manifest metadata, correct theme color property
+* fix(lesson): require lesson number to be greater/equal to one to avoid null to 0 converted lesson numbers in zod schema
+* fix(lesson): add 409 error handling and response if lesson are duplicated (Prisma P2002 error)
 
 ### Changed
 * chore(ui): device safe-area insets across app navigation
