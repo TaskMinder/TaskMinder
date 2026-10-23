@@ -550,8 +550,11 @@ async function manageHomework(mode: "add" | "edit", homework: Partial<SingleHome
     const content = $("#manage-homework-content").val()?.toString().trim();
     const assignmentDate = $("#manage-homework-date-assignment").val()?.toString() ?? "";
     const submissionDate = $("#manage-homework-date-submission").val()?.toString() ?? "";
-    const isPersonal = $("#manage-homework-visibility-private").prop("checked");
-    const teamId = $("#manage-homework-visibility-team").prop("checked") ? $("#manage-homework-visibility-team-select").val() : -1;
+    const canCreateSharedHomework = user.permissionLevel >= 1;
+    const isPersonal = !canCreateSharedHomework || $("#manage-homework-visibility-private").prop("checked");
+    const teamId = !isPersonal && $("#manage-homework-visibility-team").prop("checked")
+      ? $("#manage-homework-visibility-team-select").val()
+      : -1;
     const body = {
       subjectId,
       content,
@@ -825,7 +828,9 @@ export async function init(): Promise<void> {
       dateSubmissionInputCallback.call(this);
     });
     $("#manage-homework-visibility-team-select").on("input autocomplete", function () {
-      if ($(this).val() !== null) $("#manage-homework-visibility-team").prop("checked", true);
+      if (user.permissionLevel >= 1 && $(this).val() !== null) {
+        $("#manage-homework-visibility-team").prop("checked", true);
+      }
       checkTeamInputForSuspicious.call(this);
     });
 

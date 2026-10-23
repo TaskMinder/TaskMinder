@@ -6,7 +6,7 @@ export const setLessonDataSchema = z.object({
   body: z.strictObject({
     lessons: z.array(
       z.object({
-        lessonNumber: z.coerce.number(),
+        lessonNumber: z.coerce.number().min(1),
         weekDay: z.coerce.number().int().min(0).max(4),
         teamId: z.coerce.number(),
         subjectId: z.coerce.number(),

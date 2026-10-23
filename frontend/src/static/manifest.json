@@ -1,15 +1,32 @@
 {
-  "categories": ["education", "productivity"],
-  "description": "Synchronize homework events and more with your classmates!",
+  "id": "/main",
+  "name": "TaskMinder",
+  "short_name": "TaskMinder",
+  "description": "Keep track of homework, events and your timetable together with your class.",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": [
+    "education",
+    "productivity",
+    "utilities"
+  ],
+  "start_url": "/main",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "any",
+  "background_color": "#3bb9ca",
+  "theme_color": "#3bb9ca",
   "icons": [
     {
       "src": "/assets/app-icon.png",
-      "sizes": "1024x1024"
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
     }
   ],
-  "name": "TaskMinder",
-  "orientation": "any",
-  "start_url": "/main",
-  "theme-color": "#3bb9ca"
+  "translations": {
+    "de": {
+      "description": "Hausaufgaben, Termine und Stundenplan gemeinsam mit deiner Klasse im Blick behalten."
+    }
+  }
 }
