@@ -1,6 +1,9 @@
 .bottombar {
   border: 0 solid rgba(var(--bs-body-color-rgb), .2);
   border-top-width: 0.5px;
+  padding-right: var(--safe-area-right);
+  padding-bottom: var(--safe-area-bottom);
+  padding-left: var(--safe-area-left);
 }
 
 .bottombar-link {
@@ -47,4 +50,5 @@
   background-color: var(--bs-secondary-bg);
   z-index: 1120;
   display: flex;
+  padding: var(--safe-area-top) var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left);
 }

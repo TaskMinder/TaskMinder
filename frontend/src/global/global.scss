@@ -33,6 +33,13 @@ $navbar-top-offset: 4.375rem;
 @use "btn-back" as *;
 @use "../snippets/snippets";
 
+:root {
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+}
+
 @font-face {
   font-family: "Quicksand";
   font-display: swap;
@@ -64,7 +71,7 @@ body {
 
   font-family: "Quicksand", Arial, Helvetica, sans-serif;
   overflow: hidden;
-  padding-top: var(--navbar-height);  
+  padding-top: calc(var(--navbar-height) + var(--safe-area-top));
   font-weight: 500;
   min-height: 100dvh !important;
 
@@ -110,8 +117,14 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  height: calc(100vh - var(--navbar-height) - var(--bottombar-height));
-  height: calc(100dvh - var(--navbar-height) - var(--bottombar-height));
+  height: calc(100vh - var(--navbar-height) - var(--bottombar-height) - var(--safe-area-top) - var(--safe-area-bottom));
+  height: calc(100dvh - var(--navbar-height) - var(--bottombar-height) - var(--safe-area-top) - var(--safe-area-bottom));
+}
+
+.navbar.fixed-top {
+  padding-top: calc(var(--bs-navbar-padding-y) + var(--safe-area-top));
+  padding-right: var(--safe-area-right);
+  padding-left: var(--safe-area-left);
 }
 
 @include media-breakpoint-down(lg) {

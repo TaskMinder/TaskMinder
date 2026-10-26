@@ -11,6 +11,10 @@ $primary: #3bb9ca;
 $secondary-rgb: 108, 117, 125;
 :root {
   --shadow: 0 0.15rem 0.25rem 0.1rem;
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
 
   --primary-rgb: #{$primary-rgb};
   --secondary-rgb: #{$secondary-rgb};
@@ -184,8 +188,8 @@ a {
 
   img {
     display: block;
-    max-width: calc(100dvw - 4rem);
-    max-height: calc(100dvh - 4rem);
+    max-width: calc(100dvw - 4rem - var(--safe-area-left) - var(--safe-area-right));
+    max-height: calc(100dvh - 4rem - var(--safe-area-top) - var(--safe-area-bottom));
     width: auto;
     height: auto;
     border-radius: 1rem;
@@ -216,7 +220,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 5rem 2rem;
+  padding: calc(5rem + var(--safe-area-top)) calc(2rem + var(--safe-area-right)) 5rem calc(2rem + var(--safe-area-left));
   position: relative;
   gap: 3rem;
   @media (max-width: 1000px) {
@@ -276,7 +280,7 @@ a {
 }
 
 .section {
-  padding: 3rem 2rem;
+  padding: 3rem calc(2rem + var(--safe-area-right)) 3rem calc(2rem + var(--safe-area-left));
   border-top: 1px solid color-mix(in oklab, var(--body-color) 15%, var(--primary) 30%);
 }
 
@@ -636,7 +640,7 @@ h3 {
 }
 
 #footer-section {
-  padding: 1rem;
+  padding: 1rem calc(1rem + var(--safe-area-right)) calc(1rem + var(--safe-area-bottom)) calc(1rem + var(--safe-area-left));
   background-color: #212529;
   color: white !important;
 
