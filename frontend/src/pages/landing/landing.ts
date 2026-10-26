@@ -1,18 +1,25 @@
 function setupFeatures(): void {
   const features = document.getElementById("features")!;
-  [...document.getElementById("feature-selection")!.children].forEach((e, i) => {
+  const selection = [...document.getElementById("feature-selection")!.children];
+  selection.forEach((e, i) => {
     if (i === 0) e.classList.add("feature-selection-selected");
     e.addEventListener("click", () => {
-      e.scrollIntoView({
-        behavior: "smooth",
-        inline: "center",
-        block: "nearest"
-      });
-      document.querySelector(".feature-selection-selected")?.classList.remove("feature-selection-selected");
-      e.classList.add("feature-selection-selected");
-      document.getElementById("features")?.scrollTo({ left: i * features.offsetWidth, behavior: "smooth" });
+      features.scrollTo({ left: i * features.clientWidth, behavior: "smooth" });
     });
   });
+
+  features.addEventListener("scroll", () => {
+    const index = Math.max(0, Math.min(selection.length - 1, Math.round(features.scrollLeft / features.clientWidth)));
+    const selected = selection[index];
+    if (!selected || selected.classList.contains("feature-selection-selected")) return;
+
+    selection.forEach((e, i) => e.classList.toggle("feature-selection-selected", i === index));
+    selected.scrollIntoView({
+      behavior: "smooth",
+      inline: "center",
+      block: "nearest"
+    });
+  }, { passive: true });
 }
 
 function timingFunction(t: number, maxVal: number): number {

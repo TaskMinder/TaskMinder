@@ -4,9 +4,10 @@ All changes are grouped by type and the latest version appears first.
 
 ---
 
-## \[v2.3.2] - 2026-10-??
+## \[v2.3.2] - 2026-10-26
 
 ### Fixed
+* fix(landing): keep the selected feature pill in sync when swiping between feature images
 * fix(statistics): keep homework and event totals at their historical maximum after records are deleted
 * fix(homework): personal homework for logged-in members without edit permission
 * fix(upload): convert uploads to PDF/A-2 with RGB blending to not exceed timeout
