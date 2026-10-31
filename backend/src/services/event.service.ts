@@ -25,11 +25,14 @@ import {
   pinEventTypeBody
 } from "../schemas/event.schema.js";
 import { Prisma } from "../prisma/generated/prisma/client.js";
+import { flagBlockedAuthors } from "./block.service.js";
 
 const inFlightStyleBuild = new Map<number, Promise<string>>();
 
 // personal (account-scoped) events are not team-scoped; store this sentinel as teamId
 const PERSONAL_TEAM_ID = -1;
+
+const EVENT_AUTHOR_KEYS = ["createdByAccountId", "lastEditedByAccountId"];
 
 // canonical ordering used for both DB queries and the in-memory merge of the
 // shared and personal cache partitions; compareEvent() must mirror this
@@ -148,6 +151,21 @@ async function authorizeEventMutation(
   await assertPermissionLevel(session, ROLES.EDITOR);
 }
 
+// session-free removal, shared by deleteEvent and moderation
+export async function removeEvent(eventId: number, classId: number, ownerAccountId: number | null): Promise<void> {
+  await prisma.event.deleteMany({
+    where: {
+      eventId: eventId,
+      classId
+    }
+  });
+
+  // invalidate cache
+  await invalidateCache(CACHE_KEY_PREFIXES.EVENT, classId.toString(), ownerAccountId?.toString());
+  // send socket event
+  emitSocketToClass(classId, SOCKET_EVENTS.EVENTS);
+}
+
 export const eventService = {
   async getEventData(session: Session & Partial<SessionData>) {
     // always use classId instead of session.classId (session.classId can change during concurrent requests)
@@ -160,7 +178,7 @@ export const eventService = {
 
     // anonymous / no-account viewers only ever see shared events
     if (accountId === undefined) {
-      return shared;
+      return await flagBlockedAuthors(shared, EVENT_AUTHOR_KEYS, session);
     }
 
     // this account's personal events, cached per account
@@ -168,7 +186,7 @@ export const eventService = {
     const personal = await fetchEventPartition(personalKey, { classId, accountId });
 
     // merge the two partitions and re-sort to preserve canonical order
-    return [...shared, ...personal].sort(compareEvent);
+    return await flagBlockedAuthors([...shared, ...personal].sort(compareEvent), EVENT_AUTHOR_KEYS, session);
   },
 
   async pinEvent(reqParams: pinEventTypeParams, reqBody: pinEventTypeBody, session: Session & Partial<SessionData>) {
@@ -259,6 +277,7 @@ export const eventService = {
           endDate: endDate,
           teamId: storedTeamId,
           accountId: accountId,
+          createdByAccountId: session.account?.accountId ?? null,
           createdAt: BigInt(Date.now())
         }
       });
@@ -294,6 +313,7 @@ export const eventService = {
     emitSocketToClass(classId, SOCKET_EVENTS.EVENTS);
   },
 
+  // eslint-disable-next-line complexity
   async editEvent(
     reqParams: editEventTypeParams,
     reqBody: editEventTypeBody,
@@ -345,7 +365,8 @@ export const eventService = {
           lesson: lesson,
           endDate: endDate,
           teamId: storedTeamId,
-          accountId: newAccountId
+          accountId: newAccountId,
+          lastEditedByAccountId: session.account?.accountId ?? null
         }
       });
       // if affected rows is 0 -> throw error
@@ -417,17 +438,7 @@ export const eventService = {
     // owner may delete personal; editor may delete shared
     await authorizeEventMutation(existing.accountId, session);
 
-    await prisma.event.deleteMany({
-      where: {
-        eventId: eventId,
-        classId
-      }
-    });
-
-    // invalidate cache
-    await invalidateCache(CACHE_KEY_PREFIXES.EVENT, classId.toString(), existing.accountId?.toString());
-    // send socket event
-    emitSocketToClass(classId, SOCKET_EVENTS.EVENTS);
+    await removeEvent(eventId, classId, existing.accountId);
   },
 
   async getEventTypeData(session: Session & Partial<SessionData>) {

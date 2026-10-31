@@ -8,6 +8,9 @@ import { invalidateCache } from "../config/redis.js";
 import socketIO from "../config/socket.js";
 import { encryptionManager } from "./encryption.manager.js";
 
+// value pending legal review
+const RESOLVED_REPORT_RETENTION_DAYS = 180;
+
 /**
  * Deletes class records that are older than 1 day and are TEST CLASSES
  */
@@ -118,6 +121,35 @@ export async function cleanupDeletedAccounts(): Promise<void> {
   }
   catch (error) {
     logger.error(`Error during deleted account cleanup: ${error}`);
+  }
+}
+
+// deletes resolved reports after RESOLVED_REPORT_RETENTION_DAYS and seen moderation notices after 30 days
+export async function cleanupModerationRecords(): Promise<void> {
+  try {
+    const reportCutoff = Date.now() - RESOLVED_REPORT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+
+    const deletedReports = await prisma.report.deleteMany({
+      where: {
+        status: "resolved",
+        resolvedAt: {
+          lt: reportCutoff
+        }
+      }
+    });
+    const deletedNotices = await prisma.moderationNotice.deleteMany({
+      where: {
+        seenAt: {
+          lt: thirtyDaysAgo
+        }
+      }
+    });
+
+    logger.info(`Moderation cleanup completed: ${deletedReports.count} reports and ${deletedNotices.count} notices deleted`);
+  }
+  catch (error) {
+    logger.error(`Error during moderation cleanup: ${error}`);
   }
 }
 

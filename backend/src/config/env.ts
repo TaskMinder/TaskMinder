@@ -13,6 +13,11 @@ export type EnvConfig = {
   encryptionKey: string;
   encryptionKeySecondary: string;
   encryptionKeyLookup: string;
+  resendApiKey: string | null;
+  moderationLinkSecret: string;
+  moderationEmailTo: string;
+  moderationEmailFrom: string;
+  publicBaseUrl: string;
 };
 
 export function requireNodeEnv(): string {
@@ -56,6 +61,23 @@ export function requireBase64Key(key: string): string {
   return base64EncryptionKey;
 }
 
+export function requireValue(key: string): string {
+  const value = process.env[key];
+  if (!value){
+    failEnv(`${key} is undefined! Please define in the .env file.`);
+  }
+  return value;
+}
+
+// in development a missing key is allowed, mails are written to the log instead
+export function requireResendApiKey(nodeEnv: string): string | null {
+  const resendApiKey = process.env.RESEND_API_KEY;
+  if (!resendApiKey && nodeEnv !== "DEVELOPMENT"){
+    failEnv("RESEND_API_KEY is undefined! Please define in the .env file.");
+  }
+  return resendApiKey || null;
+}
+
 export function requireDatabaseUrl(): string {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl){
@@ -75,7 +97,12 @@ function buildEnvConfig(): EnvConfig {
     cacheEnabled: nodeEnv === "DEVELOPMENT" ? requireCacheEnabled() === "true" : false,
     encryptionKey: requireBase64Key("ENCRYPTION_KEY"),
     encryptionKeySecondary: requireBase64Key("ENCRYPTION_KEY_SECONDARY"),
-    encryptionKeyLookup: requireBase64Key("ENCRYPTION_KEY_LOOKUP")
+    encryptionKeyLookup: requireBase64Key("ENCRYPTION_KEY_LOOKUP"),
+    resendApiKey: requireResendApiKey(nodeEnv),
+    moderationLinkSecret: requireValue("MODERATION_LINK_SECRET"),
+    moderationEmailTo: requireValue("MODERATION_EMAIL_TO"),
+    moderationEmailFrom: requireValue("MODERATION_EMAIL_FROM"),
+    publicBaseUrl: requireValue("PUBLIC_BASE_URL").replace(/\/$/, "")
   };
 }
 

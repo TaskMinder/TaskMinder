@@ -34,7 +34,8 @@
     "dev:start": "concurrently -n 'backend,frontend,server' \"bun run dev:be\" \"bun run dev:fe\" \"bun run dev:server\"",
     "dev": "bun run dev:start",
     "dev-build": "bun run build && bun run dev:start",
-    "encrypt:rotate": "bun backend/dist/utils/encryption.rotate.js"
+    "encrypt:rotate": "bun backend/dist/utils/encryption.rotate.js",
+    "moderation": "bun backend/dist/utils/moderation.cli.js"
   },
   "keywords": [],
   "author": "",
@@ -67,6 +68,7 @@
     "prom-client": "15.1.3",
     "qrcode": "1.5.4",
     "redis": "6.3.0",
+    "resend": "6.34.1",
     "sass": "1.106.1",
     "sharp": "0.35.5",
     "socket.io": "4.8.4",

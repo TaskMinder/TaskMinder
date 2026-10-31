@@ -22,6 +22,21 @@ export ENCRYPTION_KEY_LOOKUP
 PROXY_HOP="$(cat /run/secrets/proxy_hop)"
 export PROXY_HOP
 
+RESEND_API_KEY="$(cat /run/secrets/resend_api_key)"
+export RESEND_API_KEY
+
+MODERATION_LINK_SECRET="$(cat /run/secrets/moderation_link_secret)"
+export MODERATION_LINK_SECRET
+
+MODERATION_EMAIL_TO="$(cat /run/secrets/moderation_email_to)"
+export MODERATION_EMAIL_TO
+
+MODERATION_EMAIL_FROM="$(cat /run/secrets/moderation_email_from)"
+export MODERATION_EMAIL_FROM
+
+PUBLIC_BASE_URL="$(cat /run/secrets/public_base_url)"
+export PUBLIC_BASE_URL
+
 # ==============================================================================
 # Ensure permissions for data are returned to bun user
 # ==============================================================================

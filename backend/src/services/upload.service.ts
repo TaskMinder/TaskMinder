@@ -24,6 +24,7 @@ import { queueJob, QUEUE_KEYS, generateCacheKey, CACHE_KEY_PREFIXES, redisClient
 import { BigIntreplacer, isValidTeamId } from "../utils/validate.functions.js";
 import { invalidateCache, updateCacheData } from "../config/redis.js";
 import { emitSocketToClass, SOCKET_EVENTS } from "../config/socket.js";
+import { flagBlockedAuthors } from "./block.service.js";
 
 type GetUploadFileResult = {
   stream: ReadStream;
@@ -54,6 +55,8 @@ const mapUploadData = (uploads: Awaited<ReturnType<typeof prisma.upload.findMany
     status: upload.status,
     errorReason: upload.errorReason,
     accountName: upload.Account?.username ?? null,
+    // stripped before responding
+    uploaderAccountId: upload.accountId,
     filesCount: upload.Files.length,
     createdAt: upload.createdAt,
     files: upload.Files.map(f => ({
@@ -65,6 +68,45 @@ const mapUploadData = (uploads: Awaited<ReturnType<typeof prisma.upload.findMany
   }));
 };
 
+// session-free removal, shared by deleteUpload and moderation; releases storage and deletes files
+export async function removeUpload(uploadData: Prisma.UploadGetPayload<{ include: { Files: true } }>): Promise<void> {
+  const { uploadId, classId } = uploadData;
+
+  // Calculate actual size (for completed uploads) or reserved size (for failed/queued)
+  const sizeToRelease = uploadData.status === "completed"
+    ? BigInt(uploadData.Files.reduce((sum, file) => sum + BigInt(file.size), 0n))
+    : uploadData.reservedBytes;
+
+  await prisma.$transaction(async tx => {
+    // Delete the upload record
+    await tx.upload.delete({
+      where: { uploadId }
+    });
+
+    // Update class storage usage
+    if (sizeToRelease > 0n) {
+      await tx.class.update({
+        where: { classId },
+        data: { storageUsedBytes: { decrement: sizeToRelease } }
+      });
+    }
+  });
+
+  // Delete all physical files from disk
+  const classDir = path.join(FINAL_UPLOADS_DIR, classId.toString());
+  for (const file of uploadData.Files) {
+    const filePath = path.join(classDir, file.storedFileName);
+    await fs.unlink(filePath).catch(() => {
+      logger.error(`Failed to delete file for classId: ${classId}, filePath: ${filePath} during upload deletion`);
+    });
+  }
+
+  // Invalidate cache after delete
+  await invalidateCache(CACHE_KEY_PREFIXES.UPLOADMETADATA, classId.toString());
+
+  emitSocketToClass(classId, SOCKET_EVENTS.UPLOADS);
+  logger.info(`upload deleted for class: ${classId}`);
+}
 
 const uploadService = {
   // file upload -> queue upload for worker to pick up
@@ -181,7 +223,7 @@ const uploadService = {
         // return directly from cache
         return {
           totalUploads,
-          uploads: cached,
+          uploads: await flagBlockedAuthors(cached, ["uploaderAccountId"], session),
           maxFilesPerClass: MAX_FILES_PER_CLASS,
           sizeLimitPerFile: MAX_FILE_SIZE,
           totalStorage: classInformation.storageQuotaBytes.toString(),
@@ -227,7 +269,7 @@ const uploadService = {
 
     const res = {
       totalUploads,
-      uploads: uploadList,
+      uploads: await flagBlockedAuthors(uploadList, ["uploaderAccountId"], session),
       maxFilesPerClass: MAX_FILES_PER_CLASS,
       sizeLimitPerFile: MAX_FILE_SIZE,
       totalStorage: classInformation.storageQuotaBytes.toString(),
@@ -507,40 +549,7 @@ const uploadService = {
 
     await isValidTeamId(uploadData.teamId, session);
 
-    // Calculate actual size (for completed uploads) or reserved size (for failed/queued)
-    const sizeToRelease = uploadData.status === "completed"
-      ? BigInt(uploadData.Files.reduce((sum, file) => sum + BigInt(file.size), 0n))
-      : uploadData.reservedBytes;
-
-    await prisma.$transaction(async tx => {
-      // Delete the upload record
-      await tx.upload.delete({
-        where: { uploadId }
-      });
-
-      // Update class storage usage
-      if (sizeToRelease > 0n) {
-        await tx.class.update({
-          where: { classId },
-          data: { storageUsedBytes: { decrement: sizeToRelease } }
-        });
-      }
-    });
-
-    // Delete all physical files from disk
-    const classDir = path.join(FINAL_UPLOADS_DIR, classId.toString());
-    for (const file of uploadData.Files) {
-      const filePath = path.join(classDir, file.storedFileName);
-      await fs.unlink(filePath).catch(() => {
-        logger.error(`Failed to delete file for classId: ${classId}, filePath: ${filePath} during upload deletion`);
-      });
-    }
-
-    // Invalidate cache after delete
-    await invalidateCache(CACHE_KEY_PREFIXES.UPLOADMETADATA, session.classId!);
-
-    emitSocketToClass(classId, SOCKET_EVENTS.UPLOADS);
-    logger.info(`upload deleted for class: ${classId}`);
+    await removeUpload(uploadData);
   },
 
   async pinUpload(

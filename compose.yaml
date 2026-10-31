@@ -30,6 +30,11 @@ services:
       - encryption_key_secondary
       - encryption_key_lookup
       - proxy_hop
+      - resend_api_key
+      - moderation_link_secret
+      - moderation_email_to
+      - moderation_email_from
+      - public_base_url
     depends_on:
       postgres:
         condition: service_healthy
@@ -163,6 +168,16 @@ secrets:
     file: ./docker_secrets/encryption_key_lookup.txt
   proxy_hop:
     file: ./docker_secrets/proxy_hop.txt
+  resend_api_key:
+    file: ./docker_secrets/resend_api_key.txt
+  moderation_link_secret:
+    file: ./docker_secrets/moderation_link_secret.txt
+  moderation_email_to:
+    file: ./docker_secrets/moderation_email_to.txt
+  moderation_email_from:
+    file: ./docker_secrets/moderation_email_from.txt
+  public_base_url:
+    file: ./docker_secrets/public_base_url.txt
 
 volumes:
   postgres-data:
