@@ -19,6 +19,7 @@ import {
   cleanupOldHomework,
   cleanupTestClasses,
   cleanupStuckUploads,
+  cleanupModerationRecords,
   migrateEventAndHomeworkDates,
   migrateUploadMetadataDates
 } from "./utils/db.cleanup.js";
@@ -46,6 +47,9 @@ import teams from "./routes/team.route.js";
 import classes from "./routes/class.route.js";
 import uploads from "./routes/upload.route.js";
 import statistics from "./routes/statistics.route.js";
+import reports from "./routes/report.route.js";
+import blocks from "./routes/block.route.js";
+import moderation from "./routes/moderation.route.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -169,6 +173,7 @@ app.get("/about", (req, res) => {
 });
 
 app.use("/stats", statistics);
+app.use("/moderation", moderation);
 
 // Apply API version check only to API routes
 app.use("/api", apiVersionMiddleware);
@@ -182,6 +187,8 @@ app.use("/api/subjects", subjects);
 app.use("/api/lessons", lessons);
 app.use("/api/classes", classes);
 app.use("/api/uploads", uploads);
+app.use("/api/reports", reports);
+app.use("/api/blocks", blocks);
 
 //
 // Protected routes: Redirect to /join if not logged in
@@ -233,6 +240,7 @@ cron.schedule("0 0 * * *", () => {
   cleanupOldEvents();
   cleanupDeletedAccounts();
   cleanupStaleUploadFiles();
+  cleanupModerationRecords();
 });
 
 // Run demo class script every week (once) - only for demo class

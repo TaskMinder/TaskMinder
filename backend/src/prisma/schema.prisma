@@ -13,6 +13,8 @@ model Account {
   password      String
   deletedAt     BigInt?
   createdAt     BigInt?
+  bannedAt      BigInt?
+  banReason     String?
 
   HomeworkCheck HomeworkCheck[]
   JoinedClass   JoinedClass?
@@ -21,6 +23,16 @@ model Account {
   // personal (account-scoped) homework and events; null accountId on these models means shared
   Homework      Homework[]
   Event         Event[]
+  // private authorship of shared and personal items, never returned in API responses
+  CreatedHomework    Homework[] @relation("HomeworkCreatedBy")
+  EditedHomework     Homework[] @relation("HomeworkLastEditedBy")
+  CreatedEvents      Event[]    @relation("EventCreatedBy")
+  EditedEvents       Event[]    @relation("EventLastEditedBy")
+  ReportsAgainst     Report[]   @relation("ReportTargetAccount")
+  ReportsFiled       Report[]   @relation("ReportReporterAccount")
+  Blocks             Block[]    @relation("Blocker")
+  BlockedBy          Block[]    @relation("Blocked")
+  ModerationNotices  ModerationNotice[]
 
   // FIXME: account_username_unique_active_key partial index for
   // deletedAt and username; manual migration in: improve_schema 20251121
@@ -43,10 +55,14 @@ model Event {
   // null = shared (team-scoped) event; set = personal event owned by this account
   accountId   Int?
   createdAt   BigInt?
+  createdByAccountId    Int?
+  lastEditedByAccountId Int?
 
   EventType   EventType @relation(fields: [eventTypeId], references: [eventTypeId], onDelete: Cascade, onUpdate: NoAction)
   Class       Class     @relation(fields: [classId], references: [classId], onDelete: Cascade, onUpdate: NoAction)
   Account     Account?  @relation(fields: [accountId], references: [accountId], onDelete: Cascade, onUpdate: NoAction)
+  CreatedBy    Account? @relation("EventCreatedBy", fields: [createdByAccountId], references: [accountId], onDelete: SetNull, onUpdate: NoAction)
+  LastEditedBy Account? @relation("EventLastEditedBy", fields: [lastEditedByAccountId], references: [accountId], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([classId])
   @@index([teamId])
@@ -97,6 +113,7 @@ model Class {
   Team                    Team[]
   Files                   Upload[]
   UploadRequest           UploadRequest[]
+  Report                  Report[]
 
   @@index([isTestClass, createdAt])
   @@map("class")
@@ -114,11 +131,15 @@ model Homework {
   // null = shared (team-scoped) homework; set = personal homework owned by this account
   accountId      Int?
   createdAt      BigInt?
+  createdByAccountId    Int?
+  lastEditedByAccountId Int?
 
   HomeworkCheck  HomeworkCheck[]
 
   Class          Class           @relation(fields: [classId], references: [classId], onDelete: Cascade, onUpdate: NoAction)
   Account        Account?        @relation(fields: [accountId], references: [accountId], onDelete: Cascade, onUpdate: NoAction)
+  CreatedBy      Account?        @relation("HomeworkCreatedBy", fields: [createdByAccountId], references: [accountId], onDelete: SetNull, onUpdate: NoAction)
+  LastEditedBy   Account?        @relation("HomeworkLastEditedBy", fields: [lastEditedByAccountId], references: [accountId], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([classId])
   @@index([teamId])
@@ -278,4 +299,65 @@ model UploadRequest {
   @@index([classId])
   @@index([teamId])
   @@map("uploadRequest")
+}
+
+model Report {
+  reportId          Int      @id @default(autoincrement())
+  classId           Int?
+  targetType        String   // "homework" | "event" | "upload" | "account" | "class"
+  targetId          Int
+  // author at report time (lastEditedBy ?? createdBy, the uploader or the reported account)
+  targetAccountId   Int?
+  reporterAccountId Int?
+  // account id or hash of the session id, used for dedupe
+  reporterKey       String
+  // optional email, encrypted with the encryption manager
+  reporterContact   String?
+  category          String   // "illegal" | "harassment" | "hate" | "sexual" | "spam" | "privacy" | "other" | "block"
+  description       String?
+  // content at report time, never file bytes
+  snapshot          Json
+  status            String   @default("open") // "open" | "resolved"
+  action            String?  // "dismiss" | "remove" | "ban" | "remove_and_ban" | "rotate_class_code"
+  decisionReason    String?
+  resolvedAt        BigInt?
+  createdAt         BigInt
+
+  Class             Class?   @relation(fields: [classId], references: [classId], onDelete: SetNull, onUpdate: NoAction)
+  TargetAccount     Account? @relation("ReportTargetAccount", fields: [targetAccountId], references: [accountId], onDelete: SetNull, onUpdate: NoAction)
+  ReporterAccount   Account? @relation("ReportReporterAccount", fields: [reporterAccountId], references: [accountId], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([targetType, targetId])
+  @@index([targetAccountId])
+  @@index([status, resolvedAt])
+  @@map("report")
+}
+
+model Block {
+  blockId          Int     @id @default(autoincrement())
+  // the blocker
+  accountId        Int
+  blockedAccountId Int
+  createdAt        BigInt
+
+  Account          Account @relation("Blocker", fields: [accountId], references: [accountId], onDelete: Cascade, onUpdate: NoAction)
+  BlockedAccount   Account @relation("Blocked", fields: [blockedAccountId], references: [accountId], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([accountId, blockedAccountId])
+  @@map("block")
+}
+
+model ModerationNotice {
+  noticeId   Int     @id @default(autoincrement())
+  accountId  Int
+  action     String  // "remove" | "remove_and_ban"
+  targetType String
+  reason     String
+  createdAt  BigInt
+  seenAt     BigInt?
+
+  Account    Account @relation(fields: [accountId], references: [accountId], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([accountId])
+  @@map("moderationNotice")
 }

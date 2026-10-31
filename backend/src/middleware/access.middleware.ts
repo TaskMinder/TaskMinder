@@ -3,6 +3,7 @@ import { Session, SessionData } from "express-session";
 import { prisma } from "../config/prisma.js";
 import { RequestError } from "../@types/requestError.js";
 import { redisClient } from "../config/redis.js";
+import { envConfig } from "../config/env.js";
 
 export const ROLES = {
   MEMBER: 0,
@@ -72,6 +73,7 @@ async function checkAccountAccess(req: Request): Promise<void> {
         "Account not found. You have been logged out"
       );
     }
+    assertNotBanned(account, req.session);
     await redisClient.set(`auth_user:${req.session.account.accountId}`, "true", {
       expiration: {type: "EX", value: 15 * 60} // 15min
     });
@@ -138,7 +140,7 @@ export async function assertPermissionLevel(
   if (session.account) {
     const joined = await prisma.joinedClass.findUnique({
       where: { accountId: session.account.accountId },
-      select: { permissionLevel: true, classId: true }
+      select: { permissionLevel: true, classId: true, Account: { select: { bannedAt: true, banReason: true } } }
     });
 
     if (!joined) {
@@ -147,6 +149,8 @@ export async function assertPermissionLevel(
       delete session.classId;
       throwError("Unauthorized", 401, "Account is not linked to any class");
     }
+    // there is no account -> session index, so bans are enforced here at check time
+    assertNotBanned(joined.Account, session);
 
     if (session.classId) {
       const sessionClassId = parseInt(session.classId, 10);
@@ -177,6 +181,22 @@ export async function assertPermissionLevel(
       "The permission level is not sufficient to perform this action"
     );
   }
+}
+
+// logs a banned account out; the message is the statement of reasons shown at login/bootstrap
+export function assertNotBanned(
+  account: { bannedAt: bigint | null; banReason: string | null },
+  session: Session & Partial<SessionData>
+): void {
+  if (account.bannedAt === null) {
+    return;
+  }
+  delete session.account;
+  throwError(
+    "Forbidden",
+    403,
+    `This account has been banned. Reason: ${account.banReason ?? "-"}. Contact: ${envConfig.moderationEmailTo}`
+  );
 }
 
 function throwError(name: string, status: number, message: string): never {

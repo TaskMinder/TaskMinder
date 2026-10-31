@@ -9,9 +9,11 @@ import {
   checkUsernameTypeQuery,
   deleteAccountTypeBody,
   loginAccountTypeBody,
+  markNoticeSeenTypeParams,
   registerAccountTypeBody
 } from "../schemas/account.schema.js";
 import { invalidateCache } from "../config/redis.js";
+import { assertNotBanned } from "../middleware/access.middleware.js";
 
 const SALTROUNDS = 10;
 
@@ -42,10 +44,11 @@ export default {
     if (session.account) {
       const accountInDb = await prisma.account.findFirst({
         where: { accountId: session.account.accountId, deletedAt: null },
-        select: { accountId: true, username: true }
+        select: { accountId: true, username: true, bannedAt: true, banReason: true }
       });
 
       if (accountInDb) {
+        assertNotBanned(accountInDb, session);
         res.loggedIn = true;
         accountIdInDatabase = accountInDb.accountId;
         res.account = { username: accountInDb.username, accountId: accountIdInDatabase };
@@ -203,6 +206,7 @@ export default {
       };
       throw err;
     }
+    assertNotBanned(account, session);
     const accountId = account.accountId;
     session.account = { username, accountId };
 
@@ -450,5 +454,30 @@ export default {
       where: { username: username, deletedAt: null }
     });
     return accountExists !== null;
+  },
+
+  async getNotices(session: Session & Partial<SessionData>) {
+    return await prisma.moderationNotice.findMany({
+      where: { accountId: session.account!.accountId, seenAt: null },
+      select: { noticeId: true, action: true, targetType: true, reason: true, createdAt: true },
+      orderBy: { createdAt: "desc" }
+    });
+  },
+
+  async markNoticeSeen(reqParams: markNoticeSeenTypeParams, session: Session & Partial<SessionData>) {
+    const { id: noticeId } = reqParams;
+    const updated = await prisma.moderationNotice.updateMany({
+      where: { noticeId, accountId: session.account!.accountId, seenAt: null },
+      data: { seenAt: BigInt(Date.now()) }
+    });
+    if (updated.count === 0) {
+      const err: RequestError = {
+        name: "Not Found",
+        status: 404,
+        message: "Notice not found",
+        expected: true
+      };
+      throw err;
+    }
   }
 };

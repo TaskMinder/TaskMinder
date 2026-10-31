@@ -9,6 +9,7 @@ import {
   checkUsernameSchema, 
   deleteAccountSchema, 
   loginAccountSchema, 
+  markNoticeSeenSchema,
   registerAccountSchema 
 } from "../schemas/account.schema.js";
 
@@ -25,5 +26,7 @@ router.patch("/password", authLimiter, checkAccess(["ACCOUNT"]), validate(change
 router.get("/auth", authLimiter, userController.getAuth);
 router.post("/logout", authLimiter, checkAccess(["ACCOUNT"]), userController.logoutAccount);
 router.get("/check-username", authLimiter, validate(checkUsernameSchema), userController.checkUsername);
+router.get("/notices", authLimiter, checkAccess(["ACCOUNT"]), userController.getNotices);
+router.post("/notices/:id/seen", authLimiter, checkAccess(["ACCOUNT"]), validate(markNoticeSeenSchema), userController.markNoticeSeen);
 
 export default router;

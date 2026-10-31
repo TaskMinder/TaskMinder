@@ -118,6 +118,26 @@ export const checkUsername = async (req: Request, res: Response, next: NextFunct
   }
 };
 
+export const getNotices = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const notices = await accountService.getNotices(req.session);
+    res.status(200).json(notices);
+  }
+  catch (error) {
+    next(error);
+  }
+};
+
+export const markNoticeSeen = async (req: Request<{ id: string }>, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    await accountService.markNoticeSeen({ id: Number(req.params.id) }, req.session);
+    res.sendStatus(200);
+  }
+  catch (error) {
+    next(error);
+  }
+};
+
 export default {
   registerAccount,
   loginAccount,
@@ -126,5 +146,7 @@ export default {
   getAuth,
   checkUsername,
   changeUsername,
-  changePassword
+  changePassword,
+  getNotices,
+  markNoticeSeen
 };
