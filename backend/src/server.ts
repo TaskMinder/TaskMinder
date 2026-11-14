@@ -19,6 +19,7 @@ import {
   cleanupOldHomework,
   cleanupTestClasses,
   cleanupStuckUploads,
+  cleanupModerationRecords,
   migrateEventAndHomeworkDates,
   migrateUploadMetadataDates
 } from "./utils/db.cleanup.js";
@@ -27,6 +28,7 @@ import { cleanupStaleUploadFiles } from "./utils/upload.cleanup.js";
 import { envConfig } from "./config/env.js";
 import { BigIntreplacer } from "./utils/validate.functions.js";
 import { prefetchSubstitutionDataForAllClasses } from "./services/substitution.service.js";
+import { sendOpenReportDigest } from "./services/report.service.js";
 import checkAccess from "./middleware/access.middleware.js";
 import { ErrorHandler } from "./middleware/error.middleware.js";
 import { loggerMiddleware } from "./middleware/logger.middleware.js";
@@ -46,6 +48,8 @@ import teams from "./routes/team.route.js";
 import classes from "./routes/class.route.js";
 import uploads from "./routes/upload.route.js";
 import statistics from "./routes/statistics.route.js";
+import reports from "./routes/report.route.js";
+import moderation from "./routes/moderation.route.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -170,6 +174,13 @@ app.get("/about", (req, res) => {
 
 app.use("/stats", statistics);
 
+// the moderation page loads its data from /moderation/api and shows its login form on 401
+app.get("/moderation", (req, res) => {
+  res.set({ "Cache-Control": "no-store", "X-Robots-Tag": "noindex" });
+  res.sendFile(path.join(pagesPath, "moderation", "moderation.html"));
+});
+app.use("/moderation/api", moderation);
+
 // Apply API version check only to API routes
 app.use("/api", apiVersionMiddleware);
 
@@ -182,6 +193,7 @@ app.use("/api/subjects", subjects);
 app.use("/api/lessons", lessons);
 app.use("/api/classes", classes);
 app.use("/api/uploads", uploads);
+app.use("/api/reports", reports);
 
 //
 // Protected routes: Redirect to /join if not logged in
@@ -233,6 +245,8 @@ cron.schedule("0 0 * * *", () => {
   cleanupOldEvents();
   cleanupDeletedAccounts();
   cleanupStaleUploadFiles();
+  cleanupModerationRecords();
+  sendOpenReportDigest();
 });
 
 // Run demo class script every week (once) - only for demo class

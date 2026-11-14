@@ -92,7 +92,16 @@ export const checkUsernameSchema = z.object({
   })
 });
 
+export const markNoticeSeenSchema = z.object({
+  params: z.object({
+    id: z.coerce.number()
+  }),
+  query: z.object({}),
+  body: z.unknown()
+});
+
 export type checkUsernameTypeQuery = z.infer<typeof checkUsernameSchema>["query"];
+export type markNoticeSeenTypeParams = z.infer<typeof markNoticeSeenSchema>["params"];
 
 export type registerAccountTypeBody = z.infer<typeof registerAccountSchema>["body"];
 export type loginAccountTypeBody = z.infer<typeof loginAccountSchema>["body"];

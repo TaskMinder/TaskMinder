@@ -18,9 +18,17 @@ import {
   pinHomeworkTypeBody
 } from "../schemas/homework.schema.js";
 import { Prisma } from "../prisma/generated/prisma/client.js";
+import { flagReportedItems } from "./report.service.js";
 
 // personal (account-scoped) homework is not team-scoped; store this sentinel as teamId
 const PERSONAL_TEAM_ID = -1;
+
+// private authorship; stripped from every response, and flagReportedItems adds isReported
+const HOMEWORK_FLAG_OPTIONS = {
+  targetType: "homework",
+  idKey: "homeworkId",
+  authorKeys: ["authorAccountId", "lastEditorAccountId"]
+} as const;
 
 // canonical ordering used for both DB queries and the in-memory merge of the
 // shared and personal cache partitions; compareHomework() must mirror this
@@ -126,6 +134,21 @@ async function authorizeHomeworkMutation(
   await assertPermissionLevel(session, ROLES.EDITOR);
 }
 
+// session-free removal, shared by deleteHomework and moderation
+export async function removeHomework(homeworkId: number, classId: number, ownerAccountId: number | null): Promise<void> {
+  await prisma.homework.deleteMany({
+    where: {
+      homeworkId: homeworkId,
+      classId
+    }
+  });
+
+  // invalidate cache
+  await invalidateCache(CACHE_KEY_PREFIXES.HOMEWORK, classId.toString(), ownerAccountId?.toString());
+  // send socket update
+  emitSocketToClass(classId, SOCKET_EVENTS.HOMEWORK);
+}
+
 const homeworkService = {
   async addHomework(
     reqBody: addHomeworkTypeBody,
@@ -139,6 +162,7 @@ const homeworkService = {
     await isValidSubjectId(subjectId, session);
     // authorize + resolve owner/team for shared vs personal
     const { accountId, storedTeamId } = await resolveHomeworkScope(isPersonal, teamId, session);
+    const creatorAccountId = session.account?.accountId ?? null;
     try {
       await prisma.homework.create({
         data: {
@@ -150,6 +174,8 @@ const homeworkService = {
           submissionDate: submissionDate,
           teamId: storedTeamId,
           accountId: accountId,
+          authorAccountId: creatorAccountId,
+          lastEditorAccountId: creatorAccountId,
           createdAt: BigInt(Date.now())
         }
       });
@@ -271,19 +297,10 @@ const homeworkService = {
     // owner may delete personal; editor may delete shared
     await authorizeHomeworkMutation(existing.accountId, session);
 
-    await prisma.homework.deleteMany({
-      where: {
-        homeworkId: homeworkId,
-        classId
-      }
-    });
-
-    // invalidate cache
-    await invalidateCache(CACHE_KEY_PREFIXES.HOMEWORK, classId.toString(), existing.accountId?.toString());
-    // send socket update
-    emitSocketToClass(classId, SOCKET_EVENTS.HOMEWORK);
+    await removeHomework(homeworkId, classId, existing.accountId);
   },
 
+  // eslint-disable-next-line complexity
   async editHomework(
     reqParams: editHomeworkTypeParams,
     reqBody: editHomeworkTypeBody,
@@ -330,7 +347,9 @@ const homeworkService = {
           assignmentDate: assignmentDate,
           submissionDate: submissionDate,
           teamId: storedTeamId,
-          accountId: newAccountId
+          accountId: newAccountId,
+          // the original author stays; an anonymous edit leaves no editor
+          lastEditorAccountId: session.account?.accountId ?? null
         }
       });
 
@@ -391,7 +410,7 @@ const homeworkService = {
 
     // anonymous / no-account viewers only ever see shared homework
     if (accountId === undefined) {
-      return shared;
+      return await flagReportedItems(shared, HOMEWORK_FLAG_OPTIONS, session);
     }
 
     // this account's personal homework, cached per account
@@ -399,7 +418,7 @@ const homeworkService = {
     const personal = await fetchHomeworkPartition(personalKey, { classId, accountId });
 
     // merge the two partitions and re-sort to preserve the canonical order
-    return [...shared, ...personal].sort(compareHomework);
+    return await flagReportedItems([...shared, ...personal].sort(compareHomework), HOMEWORK_FLAG_OPTIONS, session);
   },
 
   async pinHomework(reqParams: pinHomeworkTypeParams, reqBody: pinHomeworkTypeBody, session: Session & Partial<SessionData>) {

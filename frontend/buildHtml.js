@@ -160,7 +160,8 @@ async function buildDirectory(src, dest) {
       const relativePath = relative(sourceDir, srcFile);
       const pathSegments = relativePath.split(sep);
 
-      if (pathSegments[0] === "pages" && fileName !== "landing") {
+      // the landing page and the moderation panel are standalone pages without the app shell
+      if (pathSegments[0] === "pages" && !["landing", "moderation"].includes(fileName)) {
         await buildHtmlFile();
       }
       else {

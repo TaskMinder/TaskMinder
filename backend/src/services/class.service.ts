@@ -32,6 +32,68 @@ import {
 } from "../schemas/class.schema.js";
 import socketIO, { emitSocketToClass, SOCKET_EVENTS } from "../config/socket.js";
 
+// session-free internals, shared by the class settings endpoints and moderation
+export async function removeLoggedOutSessions(classId: number): Promise<void> {
+  // Scan all sess: keys and delete those matching classId with no account (unregistered users)
+  let deletedCount = 0;
+  const keys = await redisStore.getClassSessionKeys(classId);
+  for (const key of keys) {
+    // Redis client typing uses deeply nested generics that cause assignment failures.
+    // Runtime calls are safe — casting to any is intentional.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = await (redisClient as any).get(key);
+    if (!raw) {
+      await redisStore.removeClassSessionKey(classId, key);
+      continue;
+    }
+    const sess = JSON.parse(raw) as SessionData;
+    if (!sess.account) {
+      await redisStore.destroyBySessionKey(key);
+      deletedCount++;
+    }
+  }
+  logger.info(`Successfully deleted ${deletedCount} unregistered user sessions for class ${classId}.`);
+}
+
+export async function rotateClassCode(classId: number): Promise<string> {
+  //generate new class code, look if already used -> if not, return value
+  // Try until a unique code is found
+  let code: string;
+  const MAX_ATTEMPTS = 10;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    code = generateRandomBase62String();
+    const encryptedCode = encryptionManager.encrypt(code);
+    const classCodeHash = encryptionManager.hash(code);
+    const exists = await prisma.class.findUnique({
+      where: {
+        classCodeHash: classCodeHash
+      }
+    });
+    if (!exists) {
+      await prisma.class.update({
+        where: {
+          classId
+        },
+        data: {
+          classCode: encryptedCode,
+          classCodeHash: classCodeHash
+        }
+      });
+      emitSocketToClass(classId, SOCKET_EVENTS.CLASS_INFO);
+      logger.info(`class code was changed for class: ${classId}`);
+      return code;
+    }
+  }
+  // If unique code wasn't found after 10 tries, fail gracefully
+  const err: RequestError = {
+    name: "Server Error",
+    status: 500,
+    message: "Could not generate unique class code",
+    expected: false
+  };
+  throw err;
+}
+
 const classService = {
   /*
   getClassInfo(
@@ -775,25 +837,7 @@ const classService = {
       throw err;
     }
     try {
-      // Scan all sess: keys and delete those matching classId with no account (unregistered users)
-      let deletedCount = 0;
-      const keys = await redisStore.getClassSessionKeys(classId);
-      for (const key of keys) {
-        // Redis client typing uses deeply nested generics that cause assignment failures.
-        // Runtime calls are safe — casting to any is intentional.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const raw = await (redisClient as any).get(key);
-        if (!raw) {
-          await redisStore.removeClassSessionKey(classId, key);
-          continue;
-        }
-        const sess = JSON.parse(raw) as SessionData;
-        if (!sess.account) {
-          await redisStore.destroyBySessionKey(key);
-          deletedCount++;
-        }
-      }
-      logger.info(`Successfully deleted ${deletedCount} unregistered user sessions for class ${classId}.`);
+      await removeLoggedOutSessions(classId);
     }
     catch {
       const err: RequestError = {
@@ -863,42 +907,7 @@ const classService = {
       };
       throw err;
     }
-    //generate new class code, look if already used -> if not, return value
-    // Try until a unique code is found
-    let code: string;
-    const MAX_ATTEMPTS = 10;
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      code = generateRandomBase62String();
-      const encryptedCode = encryptionManager.encrypt(code);
-      const classCodeHash = encryptionManager.hash(code);
-      const exists = await prisma.class.findUnique({
-        where: {
-          classCodeHash: classCodeHash
-        }
-      });
-      if (!exists) {
-        await prisma.class.update({
-          where: {
-            classId
-          },
-          data: {
-            classCode: encryptedCode,
-            classCodeHash: classCodeHash
-          }
-        });
-        emitSocketToClass(classId, SOCKET_EVENTS.CLASS_INFO);
-        logger.info(`class code was changed for class: ${classId}`);
-        return code;
-      }
-    }
-    // If unique code wasn't found after 10 tries, fail gracefully
-    const err: RequestError = {
-      name: "Server Error",
-      status: 500,
-      message: "Could not generate unique class code",
-      expected: false
-    };
-    throw err;
+    return await rotateClassCode(classId);
   },
   /*
   upgradeTestClass(

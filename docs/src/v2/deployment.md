@@ -339,6 +339,8 @@ Before starting the application, create the following text files inside the `doc
 | `encryption_key_secondary.txt` | Rotation key for server-side encryption, generated with `openssl rand -base64 32`                              |
 | `encryption_key_lookup.txt`    | Lookup key for hashes for server-side encryption, generated with `openssl rand -base64 32`                     |
 | `proxy_hop.txt`                | Proxy hop count for additional reverse proxies that are configured by the server provider. Add 1 to account for the NGINX config.|
+| `resend_api_key.txt`           | API key of [Resend](https://resend.com) for the moderation mails.                                              |
+| `moderation_password.txt`      | Password of the moderation panel at `/moderation`, generated with `openssl rand -base64 32`                    |
 
 ---
 

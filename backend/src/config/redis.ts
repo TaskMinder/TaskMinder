@@ -15,7 +15,8 @@ export const CACHE_KEY_PREFIXES = {
   TEAMS: "teams_data",
   UPLOADMETADATA: "upload_metadata",
   UPLOADREQUESTS: "upload_requests",
-  STATISTICS: "site_statistics"
+  STATISTICS: "site_statistics",
+  REPORTEDIDS: "reported_ids"
 } as const;
 
 export const QUEUE_KEYS = {
@@ -122,6 +123,11 @@ export const disconnectRedis = async (): Promise<void> => {
     logger.error("Unknown error disconnecting from Redis!");
     throw new Error("Redis disconnect failed", { cause: err });
   }
+};
+
+// true when the lock was free; the caller deletes the key when done, the ttl only covers a crash
+export const acquireLock = async (key: string, ttlSeconds: number): Promise<boolean> => {
+  return await redisClient.set(key, "1", { expiration: { type: "EX", value: ttlSeconds }, condition: "NX" }) !== null;
 };
 
 export const queueJob = async (queueKey: string, jobData: unknown): Promise<void> => {

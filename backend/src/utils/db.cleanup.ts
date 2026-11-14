@@ -7,6 +7,10 @@ import { FINAL_UPLOADS_DIR } from "../config/upload.js";
 import { invalidateCache } from "../config/redis.js";
 import socketIO from "../config/socket.js";
 import { encryptionManager } from "./encryption.manager.js";
+import { APPEAL_PERIOD_MONTHS } from "./moderation.statements.js";
+
+// time after the appeal period to handle an appeal that arrived on its last day
+const APPEAL_HANDLING_DAYS = 30;
 
 /**
  * Deletes class records that are older than 1 day and are TEST CLASSES
@@ -118,6 +122,36 @@ export async function cleanupDeletedAccounts(): Promise<void> {
   }
   catch (error) {
     logger.error(`Error during deleted account cleanup: ${error}`);
+  }
+}
+
+// a decision and its notices are kept while it can be appealed (APPEAL_PERIOD_MONTHS) and while a late
+// appeal is handled, then deleted; open reports have no resolvedAt and are kept until they are decided
+export async function cleanupModerationRecords(): Promise<void> {
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setMonth(cutoffDate.getMonth() - APPEAL_PERIOD_MONTHS);
+    const cutoff = cutoffDate.getTime() - APPEAL_HANDLING_DAYS * 24 * 60 * 60 * 1000;
+
+    const deletedReports = await prisma.report.deleteMany({
+      where: {
+        resolvedAt: {
+          lt: cutoff
+        }
+      }
+    });
+    const deletedNotices = await prisma.moderationNotice.deleteMany({
+      where: {
+        createdAt: {
+          lt: cutoff
+        }
+      }
+    });
+
+    logger.info(`Moderation cleanup completed: ${deletedReports.count} reports and ${deletedNotices.count} notices deleted`);
+  }
+  catch (error) {
+    logger.error(`Error during moderation cleanup: ${error}`);
   }
 }
 

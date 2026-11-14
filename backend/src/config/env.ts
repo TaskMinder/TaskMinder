@@ -13,6 +13,8 @@ export type EnvConfig = {
   encryptionKey: string;
   encryptionKeySecondary: string;
   encryptionKeyLookup: string;
+  resendApiKey: string | null;
+  moderationPassword: string | null;
 };
 
 export function requireNodeEnv(): string {
@@ -56,6 +58,15 @@ export function requireBase64Key(key: string): string {
   return base64EncryptionKey;
 }
 
+// in development a missing value is allowed: mails are written to the log, the moderation panel stays locked
+export function requireUnlessDevelopment(key: string, nodeEnv: string): string | null {
+  const value = process.env[key];
+  if (!value && nodeEnv !== "DEVELOPMENT"){
+    failEnv(`${key} is undefined! Please define in the .env file.`);
+  }
+  return value || null;
+}
+
 export function requireDatabaseUrl(): string {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl){
@@ -75,7 +86,9 @@ function buildEnvConfig(): EnvConfig {
     cacheEnabled: nodeEnv === "DEVELOPMENT" ? requireCacheEnabled() === "true" : false,
     encryptionKey: requireBase64Key("ENCRYPTION_KEY"),
     encryptionKeySecondary: requireBase64Key("ENCRYPTION_KEY_SECONDARY"),
-    encryptionKeyLookup: requireBase64Key("ENCRYPTION_KEY_LOOKUP")
+    encryptionKeyLookup: requireBase64Key("ENCRYPTION_KEY_LOOKUP"),
+    resendApiKey: requireUnlessDevelopment("RESEND_API_KEY", nodeEnv),
+    moderationPassword: requireUnlessDevelopment("MODERATION_PASSWORD", nodeEnv)
   };
 }
 
