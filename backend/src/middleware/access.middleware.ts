@@ -3,6 +3,7 @@ import { Session, SessionData } from "express-session";
 import { prisma } from "../config/prisma.js";
 import { RequestError } from "../@types/requestError.js";
 import { redisClient } from "../config/redis.js";
+import { banStatement } from "../utils/moderation.statements.js";
 
 export const ROLES = {
   MEMBER: 0,
@@ -11,7 +12,7 @@ export const ROLES = {
   ADMIN: 3
 } as const;
 
-type AccessRequirement = "ACCOUNT" | "CLASS" | keyof typeof ROLES;
+type AccessRequirement = "ACCOUNT" | "CLASS" | "MODERATOR" | keyof typeof ROLES;
 
 export default function checkAccess(requirements: AccessRequirement[]) {
   return async (req: Request, res: Response, next: NextFunction) => {
@@ -25,6 +26,10 @@ export default function checkAccess(requirements: AccessRequirement[]) {
         if (res.headersSent) {
           return;
         }
+      }
+
+      if (requirements.includes("MODERATOR")) {
+        checkModeratorAccess(req);
       }
 
       const roleLevels = requirements.filter(
@@ -72,9 +77,18 @@ async function checkAccountAccess(req: Request): Promise<void> {
         "Account not found. You have been logged out"
       );
     }
+    assertNotBanned(account, req.session);
     await redisClient.set(`auth_user:${req.session.account.accountId}`, "true", {
       expiration: {type: "EX", value: 15 * 60} // 15min
     });
+  }
+}
+
+// the panel shows its login form on 401
+function checkModeratorAccess(req: Request): void {
+  if (!req.session.moderatorUntil || req.session.moderatorUntil < Date.now()) {
+    delete req.session.moderatorUntil;
+    throwError("Unauthorized", 401, "Nicht angemeldet oder Anmeldung abgelaufen");
   }
 }
 
@@ -138,7 +152,7 @@ export async function assertPermissionLevel(
   if (session.account) {
     const joined = await prisma.joinedClass.findUnique({
       where: { accountId: session.account.accountId },
-      select: { permissionLevel: true, classId: true }
+      select: { permissionLevel: true, classId: true, Account: { select: { bannedAt: true, banGround: true, banReason: true } } }
     });
 
     if (!joined) {
@@ -147,6 +161,8 @@ export async function assertPermissionLevel(
       delete session.classId;
       throwError("Unauthorized", 401, "Account is not linked to any class");
     }
+    // there is no account -> session index, so bans are enforced here at check time
+    assertNotBanned(joined.Account, session);
 
     if (session.classId) {
       const sessionClassId = parseInt(session.classId, 10);
@@ -177,6 +193,24 @@ export async function assertPermissionLevel(
       "The permission level is not sufficient to perform this action"
     );
   }
+}
+
+// logs a banned account out of the account and the class, so it cannot stay on as an anonymous member;
+// the message is the statement of reasons (DSA Art. 17) with the way to appeal, shown at login/bootstrap
+export function assertNotBanned(
+  account: { bannedAt: bigint | null; banGround: string | null; banReason: string | null },
+  session: Session & Partial<SessionData>
+): void {
+  if (account.bannedAt === null) {
+    return;
+  }
+  delete session.account;
+  delete session.classId;
+  throwError(
+    "Forbidden",
+    403,
+    banStatement({ bannedAt: Number(account.bannedAt), banGround: account.banGround, banReason: account.banReason })
+  );
 }
 
 function throwError(name: string, status: number, message: string): never {

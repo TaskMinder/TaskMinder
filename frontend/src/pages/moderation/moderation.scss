@@ -1,0 +1,63 @@
+// The moderation panel is a standalone page, not the app shell:
+// global.scss lets #app-scroll scroll inside a fixed-height body, here the document scrolls.
+body {
+  overflow: auto;
+}
+
+#app-scroll {
+  height: auto;
+  overflow: visible;
+  padding-bottom: 2rem;
+}
+
+// before moderation.js has set the theme
+@media (prefers-color-scheme: dark) {
+  html {
+    background: #212529;
+  }
+}
+
+// `hidden` must win over the display classes, e.g. the login view's d-block
+[hidden] {
+  display: none !important;
+}
+
+.password-field {
+  position: relative;
+
+  .form-control {
+    padding-right: 2rem;
+  }
+}
+
+.open-report-form {
+  width: auto;
+  max-width: 15rem;
+}
+
+.report-row {
+  cursor: pointer;
+}
+
+.description-cell {
+  max-width: 20rem;
+}
+
+.report-facts {
+  dt {
+    font-weight: 600;
+  }
+
+  dd {
+    overflow-wrap: anywhere;
+    white-space: pre-line;
+  }
+}
+
+.report-snapshot {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+  max-height: 60vh;
+  overflow: auto;
+}

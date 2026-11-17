@@ -9,6 +9,8 @@ declare module "express-session" {
     };
     classId?: string;
     csrfToken?: string;
+    // end of moderation panel login (set by panel password)
+    moderatorUntil?: number;
   }
 }
 declare module "express" {

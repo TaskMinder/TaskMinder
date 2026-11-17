@@ -9,9 +9,12 @@ import {
   checkUsernameTypeQuery,
   deleteAccountTypeBody,
   loginAccountTypeBody,
+  markNoticeSeenTypeParams,
   registerAccountTypeBody
 } from "../schemas/account.schema.js";
 import { invalidateCache } from "../config/redis.js";
+import { assertNotBanned } from "../middleware/access.middleware.js";
+import { appealDeadline, removalStatement } from "../utils/moderation.statements.js";
 
 const SALTROUNDS = 10;
 
@@ -42,10 +45,11 @@ export default {
     if (session.account) {
       const accountInDb = await prisma.account.findFirst({
         where: { accountId: session.account.accountId, deletedAt: null },
-        select: { accountId: true, username: true }
+        select: { accountId: true, username: true, bannedAt: true, banGround: true, banReason: true }
       });
 
       if (accountInDb) {
+        assertNotBanned(accountInDb, session);
         res.loggedIn = true;
         accountIdInDatabase = accountInDb.accountId;
         res.account = { username: accountInDb.username, accountId: accountIdInDatabase };
@@ -203,6 +207,7 @@ export default {
       };
       throw err;
     }
+    assertNotBanned(account, session);
     const accountId = account.accountId;
     session.account = { username, accountId };
 
@@ -450,5 +455,43 @@ export default {
       where: { username: username, deletedAt: null }
     });
     return accountExists !== null;
+  },
+
+  // statements of reasons for removed content; `statement` is the full German text to show,
+  // the other fields are for the client to sort and to tell new notices from seen ones
+  async getNotices(session: Session & Partial<SessionData>) {
+    const notices = await prisma.moderationNotice.findMany({
+      where: { accountId: session.account!.accountId },
+      select: { noticeId: true, reportId: true, targetType: true, ground: true, reason: true, createdAt: true, seenAt: true },
+      orderBy: { createdAt: "desc" }
+    });
+    return notices.map(notice => {
+      const createdAt = Number(notice.createdAt);
+      return {
+        ...notice,
+        appealUntil: appealDeadline(createdAt),
+        statement: removalStatement({ ...notice, createdAt })
+      };
+    });
+  },
+
+  // seen notices stay until the appeal period is over, so the statement and the way to appeal can be read again
+  async markNoticeSeen(reqParams: markNoticeSeenTypeParams, session: Session & Partial<SessionData>) {
+    const { id: noticeId } = reqParams;
+    const updated = await prisma.moderationNotice.updateMany({
+      where: { noticeId, accountId: session.account!.accountId, seenAt: null },
+      data: { seenAt: BigInt(Date.now()) }
+    });
+    const exists = updated.count > 0
+      || await prisma.moderationNotice.count({ where: { noticeId, accountId: session.account!.accountId } }) > 0;
+    if (!exists) {
+      const err: RequestError = {
+        name: "Not Found",
+        status: 404,
+        message: "Notice not found",
+        expected: true
+      };
+      throw err;
+    }
   }
 };

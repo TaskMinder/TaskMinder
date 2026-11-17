@@ -23,12 +23,16 @@ This documentation describes all database tables defined in the current Prisma s
 | password  | String    | Encrypted authentication credential | Hash algorithms may become vulnerable                |
 | createdAt | BigInt    | Account creation timestamp          | -                                                    |
 | deletedAt | BigInt    | Account deletion timestamp          | -                                                    |
+| bannedAt  | BigInt?   | Time of a moderation ban            | Records a moderation decision against the user       |
+| banGround | String?   | Ground of a ban: `terms` (terms of use no. 3) or `illegal` | Records a moderation decision against the user |
+| banReason | String?   | Statement of reasons shown to the banned user | May describe the user's misconduct          |
 
 **Privacy Concerns**:
 
 - Usernames might contain real names or other identifying information.
 - Password security is critically dependent on the strength and implementation of the hashing algorithm.
 - Personal data (`username`, `password`) is retained after the user has initiated deletion, creating a risk if the cleanup process fails.
+- `bannedAt`, `banGround` and `banReason` are a moderation decision about the user and are deleted with the account.
 
 **Solutions**:
 
@@ -84,6 +88,8 @@ This documentation describes all database tables defined in the current Prisma s
 | Event.teamId            | Integer   | Links event to a specific team             | Reveals group-specific activities                                          |
 | Event.accountId         | Integer?  | Owner account for private events; `null` for shared events | Links private event data to a specific user; may enable activity profiling |
 | Event.createdAt         | BigInt    | Record creation timestamp                  | -                                                                          |
+| Event.authorAccountId   | Integer?  | Private authorship for moderation: account that created the event, never changes; `null` after an anonymous create | Links shared content to the person who wrote it |
+| Event.lastEditorAccountId | Integer? | Private authorship for moderation: last account that created or edited the event; `null` after an anonymous edit | Links shared content to the person who last changed it |
 | EventType.eventTypeId   | Integer   | Unique event type identifier               | -                                                                          |
 | EventType.classId       | Integer   | Links type to a specific class             | -                                                                          |
 | EventType.name          | String    | Category name (e.g., "Exam", "Field Trip") | Adds context that could have privacy implications (e.g., "Detention")      |
@@ -95,6 +101,7 @@ This documentation describes all database tables defined in the current Prisma s
 - Free-text fields (`name`, `description`) are high-risk for unintentional storage of personal data.
 - The combination of event data, when linked to a `Class`, can reveal detailed schedules and activities for a specific group of students.
 - For private events, `accountId` links the event and its contents to the owning account and restricts visibility to that user.
+- `authorAccountId` and `lastEditorAccountId` record who created and who last changed an event. They are never returned by the API, are part of the cached event data in Redis and are set to `null` when the account is permanently deleted.
 
 **Solutions**:
 
@@ -119,6 +126,8 @@ This documentation describes all database tables defined in the current Prisma s
 | Homework.teamId          | Integer   | Links homework to a specific team  | Reveals team-based assignments                           |
 | Homework.accountId       | Integer?  | Owner account for private homework; `null` for shared homework | Links private homework to a specific user; may enable activity profiling |
 | Homework.createdAt       | BigInt    | Record creation timestamp | -                                                                 |
+| Homework.authorAccountId | Integer? | Private authorship for moderation: account that created the homework, never changes; `null` after an anonymous create | Links shared content to the person who wrote it |
+| Homework.lastEditorAccountId | Integer? | Private authorship for moderation: last account that created or edited the homework; `null` after an anonymous edit | Links shared content to the person who last changed it |
 | HomeworkCheck.checkId    | Integer   | Unique check identifier| -                                                                    |
 | HomeworkCheck.accountId  | Integer   | Student identifier     | Direct link to student performance                                   |
 | HomeworkCheck.homeworkId | Integer   | Assignment reference   | Creates detailed academic profile when combined with `accountId`     |
@@ -129,6 +138,7 @@ This documentation describes all database tables defined in the current Prisma s
 - The `HomeworkCheck` table creates a direct, persistent record of individual student performance and behavior (completion status).
 - This data is highly valuable for academic analytics but is privacy-sensitive and can be used for student profiling.
 - For private homework, `accountId` links the assignment and its contents to the owning account and restricts visibility to that user.
+- `authorAccountId` and `lastEditorAccountId` record who created and who last changed a homework entry. They are never returned by the API, are part of the cached homework data in Redis and are set to `null` when the account is permanently deleted.
 
 ---
 
@@ -257,6 +267,48 @@ This documentation describes all database tables defined in the current Prisma s
 
 ---
 
+### 10. Report & ModerationNotice Tables
+
+**Purpose**: Reporting content and users (EU DSA notice-and-action, Art. 16), marking reported content for the class until it is reviewed, and giving authors whose content was removed a statement of reasons (Art. 17).
+
+| Table.Field                     | Data Type | Intentionally Stored                                          | Potentially Unintentional                                        |
+| :------------------------------ | :-------- | :------------------------------------------------------------ | :--------------------------------------------------------------- |
+| Report.reportId                 | Integer   | Unique report identifier                                      | -                                                                |
+| Report.classId                  | Integer?  | Class the report was filed in                                 | -                                                                |
+| Report.targetType / targetId    | String / Integer | Reported homework, event, upload, account or class    | -                                                                |
+| Report.targetAccountId          | Integer?  | Original author of the reported content, or the reported account | **Links a user to an accusation**, even if it is dismissed    |
+| Report.editorAccountId          | Integer?  | Last editor of the reported homework or event, only when it differs from the author | **Links a user to an accusation**, even if it is dismissed |
+| Report.reporterKey              | String    | `account:<id>` or HMAC of the session id for anonymous reporters; prevents duplicate reports | Reveals who reported whom to the operator |
+| Report.reporterContact          | String?   | Optional reporter email, encrypted (aes-256-gcm)              | **Personal contact data**                                        |
+| Report.category / description   | String    | Report reason and free-text explanation                       | **Free text may contain personal data about others**             |
+| Report.snapshot                 | JSON      | Copy of the reported content (text, names, file metadata, uploader name; never file contents) | **Keeps content after it was deleted** |
+| Report.action / decisionReason  | String    | Moderation decision and its reasons                           | -                                                                |
+| Report.decisionGround           | String?   | `terms` (terms of use no. 3) or `illegal`; empty for dismissed reports | -                                                       |
+| Report.resolvedAt / createdAt   | BigInt    | Report and decision timestamps; `resolvedAt` is empty while the report is open | -                                               |
+| ModerationNotice.noticeId       | Integer   | Unique notice identifier                                      | -                                                                |
+| ModerationNotice.accountId      | Integer   | Author or last editor whose content was removed               | Records a moderation decision against the user                  |
+| ModerationNotice.reportId       | Integer   | Decision the notice is about; named in an appeal              | -                                                                |
+| ModerationNotice.targetType / ground / reason | String | What kind of content was removed, on which ground and why | -                                              |
+| ModerationNotice.createdAt / seenAt | BigInt | When the content was removed and when the user saw the notice | -                                                             |
+
+**Privacy Concerns**:
+
+- Reports link a user to an accusation and keep a copy of the reported content, even after the content or the reporter's account is deleted.
+- While a report on homework, an event or an upload is open, that item is marked as reported for every member of the class. The mark reveals neither the reporter nor the category nor the description, but it can single out content before the operator has decided.
+- Reporters can enter any email address, so the service could be used to send mails to third parties.
+
+**Solutions**:
+
+- `reporterContact` is encrypted and cleared once the report is resolved. Per day, at most 3 reports can store the same email address, 5 the same IP address and 50 any address; above that, the report is filed without contact data and no mail is sent.
+- Open reports are kept until decided. Resolved reports and notices are kept for the **six-month** appeal period (the DSA Art. 20(1) minimum) plus **30 days** for late appeals, then deleted by the daily cleanup. They are kept only to check an appeal against the original content and decision.
+- Legal basis: Art. 6(1)(c) GDPR with DSA Art. 16 and 17, and Art. 6(1)(f) GDPR for keeping decisions to handle appeals. The privacy policy (about page, no. 6) states data, purpose and retention.
+- Account references are set to `null` when an account is permanently deleted (the account id inside `reporterKey` stays until the report is deleted); notices are deleted with the account.
+- A class can file at most 30 reports per hour. The operator is mailed for at most 20 per hour, the rest goes into a daily digest. The mail contains no content, only report id, category, target type, time and the panel address; the panel needs a password and a login lasts 3 hours.
+- The reported mark is removed for everyone once the operator has decided, whatever the decision, and private author ids are never returned by the API.
+- Every decision is made by a person. The decision mail, removal notice and ban message (DSA Art. 16(5), 17) state the decision, ground, reasons and how to appeal: by mail to support@taskminder.de within six months, naming the report number or username, plus the right to go to court. Accepted ban appeals are lifted in the panel; removed content cannot be restored.
+
+---
+
 ## Cross-Table Privacy Risks
 
 The `Class` schema as a central entity increases cross-table risks.
@@ -280,9 +332,21 @@ Combining data across tables enables the creation of highly detailed user profil
 
 Our Redis architecture serves as a cache to temporarily store data, reducing database load and improving performance. Cached data is automatically cleared when the corresponding data is deleted from the database. The following types of content are stored:
 
-* Homework, events, lessons, timetables, teams, substitutions and upload metadata for each class
+* Homework, events, lessons, timetables, teams, substitutions and upload metadata for each class (homework and events include the private author ids, which are removed before responding)
 * Authenticated user and class information
 * User sessions (from express-session)
+* Daily counters of mails sent to reporters, keyed by a hash of the email address or of the IP address (expire after 24 hours)
+* Hourly counters of reports per class and of operator mails (expire after 1 hour)
+* The ids of the homework, events and uploads of a class that have an open report (expire after 60 minutes or when a report is filed or resolved)
+
+---
+
+### Email (Resend)
+
+Moderation mails are sent through [Resend](https://resend.com), which acts as a processor. It receives:
+
+* Operator mails to support@taskminder.de: report id, category, target type, time and the address of the moderation panel; once a day a mail with the number of open reports
+* For reporters who entered an email: the address, plus the receipt and the decision text with its reasons and the way to appeal
 
 ---
 
@@ -301,8 +365,8 @@ To maintain and improve our service quality, we collect certain telemetry data, 
 
 ---
 
-- **Document Version:** 2.6
-- **Stable Version Alignment:** v2.3.0
-- **Last Updated:** July 22nd, 2026
-- **Next Scheduled Review:** Quarterly – September 1st, 2026
+- **Document Version:** 2.7
+- **Stable Version Alignment:** v2.4.0
+- **Last Updated:** November 17th, 2026
+- **Next Scheduled Review:** Quarterly – December 31st, 2026
 - **Technical Contact:** [info@taskminder.de](mailto:info@taskminder.de)
