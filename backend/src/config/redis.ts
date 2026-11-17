@@ -125,7 +125,7 @@ export const disconnectRedis = async (): Promise<void> => {
   }
 };
 
-// true when the lock was free; the caller deletes the key when done, the ttl only covers a crash
+// true when lock was free; caller deletes key when done, ttl only covers crash
 export const acquireLock = async (key: string, ttlSeconds: number): Promise<boolean> => {
   return await redisClient.set(key, "1", { expiration: { type: "EX", value: ttlSeconds }, condition: "NX" }) !== null;
 };

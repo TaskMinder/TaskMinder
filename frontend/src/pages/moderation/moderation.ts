@@ -1,11 +1,10 @@
-// Moderation panel (moderation.html). It is not part of the app shell: it loads its data from
+// Moderation panel (moderation.html). NOT part of the app shell: it loads its data from
 // /moderation/api as JSON and sets every user-written text with textContent, never as HTML.
-
 type ModerationAction = "dismiss" | "remove" | "ban" | "remove_and_ban" | "rotate_class_code";
 type Ground = "terms" | "illegal";
 // timestamps from the database arrive as strings (BigInt)
 type Timestamp = string;
-type AccountInfo = { username: string; bannedAt: Timestamp | null } | null;
+type AccountInfo = { username: string; bannedAt: Timestamp | null; onlyAdmin: boolean } | null;
 
 type Overview = {
   loginUntil: number;
@@ -81,20 +80,20 @@ const DECISION_LABELS: Record<ModerationAction, string> = {
 };
 
 const ACTION_HINTS: Record<ModerationAction, string> = {
-  dismiss: "Inhalt und Konto bleiben, wie sie sind.",
+  dismiss: "Inhalt und Konto bleiben unverändert.",
   remove: "Löscht den Inhalt für die ganze Klasse.",
-  ban: "Sperrt ein Konto für ganz TaskMinder, bis du es entsperrst.",
-  remove_and_ban: "Löscht den Inhalt und sperrt ein Konto für ganz TaskMinder.",
-  rotate_class_code: "Die Klasse bekommt einen neuen Code, alle anonymen Mitglieder werden abgemeldet."
+  ban: "Sperrt das Konto für ganz TaskMinder.",
+  remove_and_ban: "Löscht den Inhalt und sperrt das Konto für ganz TaskMinder.",
+  rotate_class_code: "Neuer Klassencode wird generiert und alle anonymen Mitglieder werden abgemeldet."
 };
 
 // who reads the reason; they also get the ground and how to appeal
 const REASON_HINTS: Record<ModerationAction, string> = {
-  dismiss: "Optional. Melder mit E-Mail-Adresse bekommen sie.",
-  remove: "Pflicht. Autor, letzter Bearbeiter und Melder mit E-Mail-Adresse lesen sie.",
-  ban: "Pflicht. Das gesperrte Konto und Melder mit E-Mail-Adresse lesen sie.",
-  remove_and_ban: "Pflicht. Autor, letzter Bearbeiter, das gesperrte Konto und Melder mit E-Mail-Adresse lesen sie.",
-  rotate_class_code: "Pflicht. Melder mit E-Mail-Adresse lesen sie."
+  dismiss: "Optional: Melder mit E-Mail-Adresse bekommen sie.",
+  remove: "Pflicht: Autor, letzter Bearbeiter und Melder mit E-Mail-Adresse lesen sie.",
+  ban: "Pflicht: Das gesperrte Konto und Melder mit E-Mail-Adresse lesen sie.",
+  remove_and_ban: "Pflicht: Autor, letzter Bearbeiter, das gesperrte Konto und Melder mit E-Mail-Adresse lesen sie.",
+  rotate_class_code: "Pflicht: Melder mit E-Mail-Adresse lesen sie."
 };
 
 // asked before decisions that cannot be undone in the panel
@@ -128,7 +127,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   other: "Sonstiges"
 };
 
-// categories that need a quick look get a stronger color
+// categories that need quick look get stronger color
 const CATEGORY_COLORS: Record<string, string> = {
   illegal: "danger",
   hate: "danger",
@@ -145,7 +144,7 @@ const TARGET_TYPE_LABELS: Record<string, string> = {
   class: "Klasse"
 };
 
-// only homework and events have an editor besides the author
+// only homework and events have editor besides author
 const EDITABLE_TARGET_TYPES = ["homework", "event"];
 // reports open for this long are highlighted
 const OLD_REPORT_HOURS = 24;
@@ -204,7 +203,11 @@ function targetText(targetType: string, targetId: number): string {
 }
 
 function accountText(accountId: number | null, account: AccountInfo): string {
-  return accountId === null || account === null ? "unbekannt oder anonym" : `#${accountId} ${account.username}`;
+  if (accountId === null || account === null) {
+    return "unbekannt oder anonym";
+  }
+  // ban would leave class without admin who can act, so operator should know before deciding
+  return `#${accountId} ${account.username}${account.onlyAdmin ? " (einziger Admin der Klasse)" : ""}`;
 }
 
 // ---------- API ----------
@@ -482,7 +485,7 @@ function showDecisionError(message: string): void {
   toggleAlert("decision-error", true);
 }
 
-// the request body, or the message why the form cannot be sent yet
+// request body, or message why form cannot be sent yet
 function readDecisionForm(): { body: Record<string, unknown> } | { error: string } {
   const action = selectedAction();
   const ground = byId<HTMLSelectElement>("decision-ground").value;
@@ -567,7 +570,6 @@ async function route(): Promise<void> {
     }
   }
   catch (error) {
-    // the page now belongs to the new URL, so the login loads it afresh
     handleError(error, false);
   }
 }
@@ -641,7 +643,6 @@ async function submitLogin(ev: SubmitEvent): Promise<void> {
   }
 }
 
-// same behaviour as the app's password input: the eye shows once something is typed
 let passwordVisible = false;
 
 function updatePasswordToggle(): void {
@@ -673,14 +674,14 @@ async function logout(): Promise<void> {
 
 // ---------- Start ----------
 
-// same rule as the app: the stored choice first, then the system setting
+// same rule as app: stored choice first, then system setting
 function applyColorTheme(): void {
   let stored: string | null = null;
   try {
     stored = localStorage.getItem("colorTheme");
   }
   catch {
-    // storage can be blocked, the system setting is used then
+    // storage can be blocked, system setting is used then
   }
   const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
   const theme = stored === "dark" || stored === "light" ? stored : prefersDark ? "dark" : "light";
@@ -707,7 +708,7 @@ byId("open-report-form").addEventListener("submit", ev => {
   if (/^\d+$/.test(id)) navigate(`/moderation?report=${id}`);
 });
 
-// links inside the panel switch views without reloading the page
+// links inside panel switch views without reloading page
 document.addEventListener("click", ev => {
   const link = (ev.target as Element).closest<HTMLAnchorElement>("a[data-nav]");
   if (!link || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
@@ -718,5 +719,5 @@ window.addEventListener("popstate", () => void route());
 
 void route();
 
-// makes this file a module, so its helper names stay out of the global scope
+// make this file module, so helper names stay out of global scope
 export {};

@@ -31,6 +31,21 @@ import {
   upgradeTestClassTypeParams
 } from "../schemas/class.schema.js";
 import socketIO, { emitSocketToClass, SOCKET_EVENTS } from "../config/socket.js";
+import { assertNotBanned } from "../middleware/access.middleware.js";
+
+// /join has no access gate, so a logged-in session is checked here: a banned account must not get a membership
+async function assertSessionAccountNotBanned(session: Session & Partial<SessionData>): Promise<void> {
+  if (!session.account) {
+    return;
+  }
+  const account = await prisma.account.findUnique({
+    where: { accountId: session.account.accountId },
+    select: { bannedAt: true, banGround: true, banReason: true }
+  });
+  if (account) {
+    assertNotBanned(account, session);
+  }
+}
 
 // session-free internals, shared by the class settings endpoints and moderation
 export async function removeLoggedOutSessions(classId: number): Promise<void> {
@@ -290,6 +305,7 @@ const classService = {
       };
       throw err;
     }
+    await assertSessionAccountNotBanned(session);
     // try to find class by hash
     const classCodeHash = encryptionManager.hash(classCode);
     const targetClass = await prisma.class.findUnique({

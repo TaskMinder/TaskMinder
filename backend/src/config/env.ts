@@ -58,7 +58,7 @@ export function requireBase64Key(key: string): string {
   return base64EncryptionKey;
 }
 
-// in development a missing value is allowed: mails are written to the log, the moderation panel stays locked
+// missing value (in dev) allowed: mails written to log, moderation panel stays locked
 export function requireUnlessDevelopment(key: string, nodeEnv: string): string | null {
   const value = process.env[key];
   if (!value && nodeEnv !== "DEVELOPMENT"){

@@ -299,15 +299,13 @@ This documentation describes all database tables defined in the current Prisma s
 
 **Solutions**:
 
-- `reporterContact` is encrypted and cleared once the report is resolved.
-- Open reports are kept until they are decided. A decision can be appealed for **six months** (the minimum DSA Art. 20(1) sets for complaint systems); resolved reports and notices are kept for that period plus **30 days** to handle a late appeal, then deleted by the daily cleanup. That is the only purpose they are kept for: checking an appeal against the original content and decision. Notices stay after they were seen, so the user can read the statement and the way to appeal again.
-- Legal basis: Art. 6(1)(c) GDPR with DSA Art. 16 and 17 (processing notices, informing reporters and affected users), and Art. 6(1)(f) GDPR for keeping decisions to handle appeals. The privacy policy (about page, no. 6) states the data, the purpose and the retention.
-- Account references are set to `null` when an account is permanently deleted; the account id inside `reporterKey` stays until the report is deleted. Notices are deleted with the account.
-- Per day, at most 3 reports can store the same email address, at most 5 can store one from the same IP address and at most 50 can store one at all. Above the limit, the report is filed without contact data, so no mail is sent.
-- A class can file at most 30 reports per hour. The operator is mailed for at most 20 reports per hour; the rest is listed in a daily digest of all open reports.
-- The operator mail contains no content, only report id, category, target type, time and the address of the moderation panel. The panel needs a password and lists the reports; a login lasts 3 hours.
-- The reported mark is removed for everyone as soon as the operator has decided, whatever the decision was, so a dismissed report leaves no trace on the content. The private author ids of homework and events are never part of the response.
-- Every decision is made by a person. The reporter's decision mail (DSA Art. 16(5)), the removal notice and the ban message (DSA Art. 17) state the decision, the ground (terms of use no. 3 or the law named in the reason), the reasons, that it followed a report and was not automated, and how to appeal: by mail to support@taskminder.de within six months, naming the report number or the username, plus the right to go to court. An accepted appeal against a ban is lifted in the moderation panel; removed content cannot be restored, the author can enter it again.
+- `reporterContact` is encrypted and cleared once the report is resolved. Per day, at most 3 reports can store the same email address, 5 the same IP address and 50 any address; above that, the report is filed without contact data and no mail is sent.
+- Open reports are kept until decided. Resolved reports and notices are kept for the **six-month** appeal period (the DSA Art. 20(1) minimum) plus **30 days** for late appeals, then deleted by the daily cleanup. They are kept only to check an appeal against the original content and decision.
+- Legal basis: Art. 6(1)(c) GDPR with DSA Art. 16 and 17, and Art. 6(1)(f) GDPR for keeping decisions to handle appeals. The privacy policy (about page, no. 6) states data, purpose and retention.
+- Account references are set to `null` when an account is permanently deleted (the account id inside `reporterKey` stays until the report is deleted); notices are deleted with the account.
+- A class can file at most 30 reports per hour. The operator is mailed for at most 20 per hour, the rest goes into a daily digest. The mail contains no content, only report id, category, target type, time and the panel address; the panel needs a password and a login lasts 3 hours.
+- The reported mark is removed for everyone once the operator has decided, whatever the decision, and private author ids are never returned by the API.
+- Every decision is made by a person. The decision mail, removal notice and ban message (DSA Art. 16(5), 17) state the decision, ground, reasons and how to appeal: by mail to support@taskminder.de within six months, naming the report number or username, plus the right to go to court. Accepted ban appeals are lifted in the panel; removed content cannot be restored.
 
 ---
 
@@ -369,6 +367,6 @@ To maintain and improve our service quality, we collect certain telemetry data, 
 
 - **Document Version:** 2.7
 - **Stable Version Alignment:** v2.4.0
-- **Last Updated:** November 14th, 2026
+- **Last Updated:** November 17th, 2026
 - **Next Scheduled Review:** Quarterly – December 31st, 2026
 - **Technical Contact:** [info@taskminder.de](mailto:info@taskminder.de)

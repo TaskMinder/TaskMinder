@@ -11,6 +11,7 @@ import { removeHomework } from "./homework.service.js";
 import { removeEvent } from "./event.service.js";
 import { removeUpload } from "./upload.service.js";
 import { removeLoggedOutSessions, rotateClassCode } from "./class.service.js";
+import { ROLES } from "../middleware/access.middleware.js";
 import { refreshReportedFlags } from "./report.service.js";
 import { DecisionGround, ModerationAction, appealDeadline, reporterDecisionMail } from "../utils/moderation.statements.js";
 import {
@@ -23,7 +24,7 @@ import {
 
 type Report = NonNullable<Awaited<ReturnType<typeof prisma.report.findUnique>>>;
 type BanTarget = NonNullable<resolveReportTypeBody["banTarget"]>;
-type AccountInfo = { username: string; bannedAt: bigint | null } | null;
+type AccountInfo = { username: string; bannedAt: bigint | null; onlyAdmin: boolean } | null;
 
 // short, since the panel can remove content and ban accounts
 const MODERATOR_SESSION_MS = 3 * 60 * 60 * 1000;
@@ -174,10 +175,32 @@ async function applyDecision(
   }
 }
 
+// a banned admin cannot act, so a class whose only admin is banned cannot be managed any more
+async function isOnlyActiveAdmin(accountId: number): Promise<boolean> {
+  const membership = await prisma.joinedClass.findUnique({
+    where: { accountId },
+    select: { classId: true, permissionLevel: true }
+  });
+  if (membership?.permissionLevel !== ROLES.ADMIN) {
+    return false;
+  }
+  const otherActiveAdmins = await prisma.joinedClass.count({
+    where: {
+      classId: membership.classId,
+      permissionLevel: ROLES.ADMIN,
+      accountId: { not: accountId },
+      Account: { bannedAt: null }
+    }
+  });
+  return otherActiveAdmins === 0;
+}
+
 async function findAccountInfo(accountId: number | null): Promise<AccountInfo> {
-  return accountId === null
-    ? null
-    : await prisma.account.findUnique({ where: { accountId }, select: { username: true, bannedAt: true } });
+  if (accountId === null) {
+    return null;
+  }
+  const account = await prisma.account.findUnique({ where: { accountId }, select: { username: true, bannedAt: true } });
+  return account && { ...account, onlyAdmin: await isOnlyActiveAdmin(accountId) };
 }
 
 const moderationService = {
