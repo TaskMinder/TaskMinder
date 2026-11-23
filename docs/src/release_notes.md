@@ -4,6 +4,15 @@ All changes are grouped by type and the latest version appears first.
 
 ---
 
+## \[v2.3.3] - 2026-12-??
+
+### Fixed
+
+### Changed
+* chore(packages): bump packages (npm, vendor, docker)
+
+---
+
 ## \[v2.3.2] - 2026-10-26
 
 ### Fixed
