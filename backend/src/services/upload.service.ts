@@ -457,7 +457,8 @@ const uploadService = {
             where: { uploadId },
             data: {
               status: "failed",
-              errorReason: error instanceof Error ? error.message : "queue_failed",
+              // errorReason is sent to clients, do not expose internal (Redis) error messages
+              errorReason: "queue_failed",
               reservedBytes: 0n
             }
           });

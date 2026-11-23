@@ -29,6 +29,16 @@ const execFileAsync = promisify(execFile);
 const TEXT_MIME_TYPES = new Set(["text/plain", "text/markdown", "text/csv"]);
 const normalizeMimeType = (mimeType: string): string => MIME_CANONICAL_ALIASES[mimeType] ?? mimeType;
 
+// errorReason of failed uploads is sent to clients: only keep messages of expected errors,
+// internal messages (e.g. file system paths from fs/sharp) become "unknown_error"
+const toClientErrorReason = (error: unknown): string => {
+  const isExpected = typeof error === "object" && error !== null && "expected" in error && error.expected === true;
+  if (isExpected && "message" in error) {
+    return String(error.message);
+  }
+  return "unknown_error";
+};
+
 const SAMPLE_SIZE = 8192;
 const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 
@@ -509,10 +519,7 @@ const processJob = async (job: FileProcessingJob): Promise<void> => {
     );
 
     // Mark upload as failed and release reserved storage
-    const errorReason =
-      error && typeof error === "object" && "message" in error
-        ? String(error.message)
-        : "unknown_error";
+    const errorReason = toClientErrorReason(error);
 
     await prisma.$transaction(async tx => {
       if (!job.replaceUpload || metadataReplaced) {

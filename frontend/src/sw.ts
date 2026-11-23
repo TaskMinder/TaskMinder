@@ -79,9 +79,55 @@ sw.addEventListener("activate", async () => {
 async function removeOutdatedCaches(version: string): Promise<void> {
   const CORE_CACHE = "core-v" + version;
   const API_CACHE = "api-v" + version;
+  // only remove TaskMinder-owned caches
   (await caches.keys())
-    .filter(name => ! [CORE_CACHE, API_CACHE].includes(name))
+    .filter(name => (name.startsWith("core-v") || name.startsWith("api-v")) && ! [CORE_CACHE, API_CACHE].includes(name))
     .forEach(name => caches.delete(name));
+}
+
+// shown for page navigations that fail offline; native shells can detect it by the header or the meta tag
+const OFFLINE_HTML = `<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="taskminder-offline" content="1">
+  <title>Offline - TaskMinder</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 16px; box-sizing: border-box; font-family: system-ui, sans-serif; text-align: center; }
+    a { display: inline-block; margin-top: 8px; padding: 8px 16px; border: 1px solid currentColor;
+      border-radius: 8px; color: inherit; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Du bist offline</h1>
+    <p>Diese Seite ist ohne Internetverbindung nicht verfügbar.</p>
+    <a href="">Erneut versuchen</a>
+  </main>
+</body>
+</html>`;
+
+function fetchFailedResponse(req: Request, url: URL): Response {
+  if (req.mode === "navigate") {
+    return new Response(OFFLINE_HTML, {
+      status: 503,
+      headers: { "Content-Type": "text/html;charset=utf-8", "X-TaskMinder-Offline": "1" }
+    });
+  }
+  return new Response(`Fetch failed for ${req.method} ${url}`, { status: 503 });
+}
+
+async function fetchNetworkOnly(req: Request, url: URL): Promise<Response> {
+  try {
+    return await fetch(req);
+  }
+  catch (err) {
+    if (req.mode === "navigate") return fetchFailedResponse(req, url);
+    throw err;
+  }
 }
 
 type Bootstrap = { maintenance: boolean, online: boolean, version: string, cacheEnabled: boolean, maintenanceHtml: string, classJoined: boolean }
@@ -146,7 +192,7 @@ async function handleFetch(ev: FetchEvent): Promise<Response> {
         return await fetch(req);
       }
       catch {
-        return new Response(`Fetch failed for ${req.method} ${url}`, { status: 503 });
+        return fetchFailedResponse(req, url);
       }
     }
 
@@ -164,7 +210,7 @@ async function handleFetch(ev: FetchEvent): Promise<Response> {
         return res;
       }
       catch {
-        return cached || new Response(`Fetch failed for ${req.method} ${url}`, { status: 503 });
+        return cached || fetchFailedResponse(req, url);
       }
     }
 
@@ -184,12 +230,11 @@ async function handleFetch(ev: FetchEvent): Promise<Response> {
       }
       catch {
         const cached = await cache.match(req);
-        return cached || new Response(`Fetch failed for ${req.method} ${url}`, { status: 503 });
+        return cached || fetchFailedResponse(req, url);
       }
     }
   }
-  const res = await fetch(req);
-  return res;
+  return fetchNetworkOnly(req, url);
 }
 
 sw.addEventListener("fetch", (ev: FetchEvent) => {

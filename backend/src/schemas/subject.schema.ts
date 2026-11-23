@@ -10,7 +10,7 @@ export const setSubjectsSchema = z.object({
         subjectNameLong: z.string().trim().min(1).max(256),
         subjectNameShort: z.string().trim().min(1).max(256),
         subjectNameSubstitution: z.array(z.string()).nullable(),
-        teacherGender: z.enum(["d", "w", "m"]),
+        teacherGender: z.enum(["d", "f", "m"]),
         teacherNameLong: z.string().trim().min(1).max(256),
         teacherNameShort: z.string().trim().min(1).max(256),
         teacherNameSubstitution: z.array(z.string()).nullable(),

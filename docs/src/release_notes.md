@@ -7,8 +7,18 @@ All changes are grouped by type and the latest version appears first.
 ## \[v2.3.3] - 2026-12-??
 
 ### Fixed
+* fix(upload): editing an upload with new files no longer fails with "Invalid upload id"
+* fix(upload): copy picked files into memory before sending to avoid truncated uploads on iOS/iPadOS WebKit ("Unexpected end of form")
+* fix(upload): respond with 400 instead of 500 to incomplete or malformed multipart uploads
+* fix(upload): only expose expected error reasons of failed uploads to clients, internal errors are stored as `unknown_error`
+* fix(offline): clear cached API data and queued offline requests when the account or class changes, so they do not carry over to the next user on a shared device
+* fix(offline): show an offline page instead of a plain-text error when a page cannot be loaded offline
+* fix(offline): only remove TaskMinder's own caches when cleaning up outdated service worker caches
 
 ### Changed
+* chore(upload): show readable reasons for failed uploads (unsupported type, potential threat, invalid text encoding, timeout, queue failure)
+* chore(subject): rename teacher salutation values from m/w/d to m/f/d
+* chore(settings): sort class members alphabetically
 * chore(packages): bump packages (npm, vendor, docker)
 
 ---

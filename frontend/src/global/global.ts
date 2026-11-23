@@ -463,7 +463,7 @@ export async function loadTimetableData(date: Date): Promise<TimetableData[]> {
         subjectNameShort: subject.subjectNameShort,
         subjectNameSubstitution: subject.subjectNameSubstitution ?? [],
         teacherName:
-          (subject.teacherGender === "w" ? "Frau " : "") +
+          (subject.teacherGender === "f" ? "Frau " : "") +
           (subject.teacherGender === "m" ? "Herr " : "") +
           subject.teacherNameLong,
         teacherNameSubstitution: subject.teacherNameSubstitution ?? []
@@ -757,8 +757,12 @@ export function highlightUnavailable(): void {
 }
 
 export function openRequestQueueDB(): Promise<IDBDatabase> {
-  return new Promise(res => {
+  return new Promise((res, rej) => {
     const db = indexedDB.open("request-queue", 1);
+
+    db.addEventListener("error", () => {
+      rej(db.error);
+    });
 
     db.addEventListener("upgradeneeded", () => {
       db.result.createObjectStore("queue", {
@@ -1360,6 +1364,53 @@ export function createSocketDataAccessor<DataType>(name: string, socketEv: strin
   return accessor;
 }
 
+// Private offline data (cached API responses, queued writes) belongs to one account and class.
+// It must not carry over to the next identity (login, logout, register, joining/leaving/being removed from a class).
+const OFFLINE_IDENTITY_KEY = "offline-identity";
+
+async function clearPrivateOfflineData(): Promise<void> {
+  // the service worker caches API responses in "api-v<version>"
+  if ("caches" in globalThis) {
+    const cacheNames = await caches.keys();
+    await Promise.all(cacheNames.filter(name => name.startsWith("api-v")).map(name => caches.delete(name)));
+  }
+  // discard queued writes of the previous identity instead of replaying them as the new one
+  const db = await openRequestQueueDB();
+  db.transaction("queue", "readwrite").objectStore("queue").clear();
+  await renderRequestQueue();
+}
+
+async function syncOfflineIdentity(accountId: number | string, classId: number | string | null | undefined): Promise<void> {
+  // offline (or maintenance) the auth response comes from the same cache as the data, so both still match
+  const b = await bootstrap();
+  if (!b.online || b.maintenance) return;
+
+  const identity = `${accountId}:${classId ?? ""}`;
+  let storedIdentity: string | null;
+  try {
+    storedIdentity = localStorage.getItem(OFFLINE_IDENTITY_KEY);
+  }
+  catch {
+    return;
+  }
+  if (storedIdentity === identity) return;
+
+  // never block auth: if IndexedDB or CacheStorage fail, keep the old identity and retry on the next auth
+  try {
+    await clearPrivateOfflineData();
+  }
+  catch (err) {
+    console.error("Clearing private offline data failed: ", err);
+    return;
+  }
+  try {
+    localStorage.setItem(OFFLINE_IDENTITY_KEY, identity);
+  }
+  catch {
+    // storage unavailable: data is cleared again on the next auth
+  }
+}
+
 // User
 export const user = {
   isAuthed: false as boolean,
@@ -1387,6 +1438,8 @@ export const user = {
     user.permissionLevel = json.permissionLevel ?? 0;
     user.classId = json.classId;
     user.accountId = json.account?.accountId ?? "";
+
+    await syncOfflineIdentity(user.accountId, user.classId);
 
     user.changeEvents++;
     this._authAwaits.forEach(res => res());

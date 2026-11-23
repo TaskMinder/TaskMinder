@@ -7,7 +7,7 @@ import { NextFunction, Request, Response } from "express";
 import { RequestError } from "../@types/requestError.js";
 import logger from "../config/logger.js";
 
-export const MIN_VERSION = "2.3.1";
+export const MIN_VERSION = "2.3.3";
 export const MAX_VERSION = "2.3.3";
 
 const SEMVER_REGEX = /^\d+\.\d+\.\d+$/;

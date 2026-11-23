@@ -583,11 +583,14 @@ const classService = {
         }
       }
     });
-    // return the mapped array with username, accountId and permissionLevel
-    return classMembers.map(({ Account, permissionLevel }) => ({
-      ...Account,
-      permissionLevel
-    }));
+    // return mapped array with username, accountId and permissionLevel,
+    // sorted alphabetically by username (case-insensitive, German collation for umlauts)
+    return classMembers
+      .map(({ Account, permissionLevel }) => ({
+        ...Account,
+        permissionLevel
+      }))
+      .sort((a, b) => a.username.localeCompare(b.username, "de", { sensitivity: "base" }));
   },
   /*
   kickClassMember(

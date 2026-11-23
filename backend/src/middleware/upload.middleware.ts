@@ -20,6 +20,13 @@ import { getUploadedFiles, performUploadCleanup, registerReservedBytes, register
 
 const normalizeMimeType = (mimeType: string): string => MIME_CANONICAL_ALIASES[mimeType] ?? mimeType;
 
+const MULTIPART_PARSE_ERRORS = new Set([
+  "Unexpected end of form",
+  "Unexpected end of file",
+  "Malformed part header",
+  "Multipart: Boundary not found"
+]);
+
 //
 // normalizes file requests into one consistent format
 //
@@ -126,9 +133,7 @@ export const preflightEditStorageQuotaCheck = async (
   }
 
   const classIdNum = parseInt(req.session.classId!, 10);
-  const uploadId = typeof req.params.id === "string"
-    ? Number.parseInt(req.params.id, 10)
-    : Number.NaN;
+  const uploadId = Number(req.params.id);
 
   if (Number.isNaN(uploadId)) {
     const err: RequestError = {
@@ -387,6 +392,17 @@ export const handleFileUpload = (req: Request, res: Response, next: NextFunction
         name: "Bad Request",
         status: 400,
         message: err.message,
+        expected: true
+      };
+      return next(error);
+    }
+    // busboy parse errors (e.g. truncated multipart body from iOS WebKit or aborted uploads)
+    // are client errors, not server errors
+    if (err instanceof Error && MULTIPART_PARSE_ERRORS.has(err.message)) {
+      const error: RequestError = {
+        name: "Bad Request",
+        status: 400,
+        message: "Upload incomplete: the file data could not be read completely",
         expected: true
       };
       return next(error);

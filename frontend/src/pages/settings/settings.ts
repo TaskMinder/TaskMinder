@@ -479,7 +479,7 @@ async function renderSubjectList(): Promise<void> {
 
     t.find(".subject-changed-name-long-old").text(subjectNameLong);
     t.find(".subject-changed-name-short-old").text(subjectNameShort);
-    t.find(".subject-changed-teacher-gender-old").text({ w: "Frau", m: "Herr", d: "Keine Anrede" }[subject.teacherGender]);
+    t.find(".subject-changed-teacher-gender-old").text({ f: "Frau", m: "Herr", d: "Keine Anrede" }[subject.teacherGender]);
     t.find(".subject-changed-teacher-long-old").text(teacherNameLong);
     t.find(".subject-changed-teacher-short-old").text(teacherNameShort);
     t.find(".subject-changed-name-substitution-old").text(subjectNameSubstitution);
@@ -559,7 +559,7 @@ async function renderSubjectList(): Promise<void> {
         $changedTeacherGender(id).hide();
       }
       else if (! $deleted(id).is(":visible")) {
-        $changedTeacherGender(id).show().find("b").text({ w: "Frau", m: "Herr", d: "Keine Anrede" }[newVal as "w" | "m" | "d"]);
+        $changedTeacherGender(id).show().find("b").text({ f: "Frau", m: "Herr", d: "Keine Anrede" }[newVal as "f" | "m" | "d"]);
       }
       toggleChangesContainer(id);
     }
@@ -1851,7 +1851,7 @@ export async function init(): Promise<void> {
           subjectId: $(this).data("id"),
           subjectNameLong: $(this).find(".subject-name-long-input").val()?.toString() ?? "",
           subjectNameShort: $(this).find(".subject-name-short-input").val()?.toString() ?? "",
-          teacherGender: ($(this).find(".subject-teacher-gender-input").val()?.toString() ?? "") as "m" | "w" | "d",
+          teacherGender: ($(this).find(".subject-teacher-gender-input").val()?.toString() ?? "") as "m" | "f" | "d",
           teacherNameLong: $(this).find(".subject-teacher-long-input").val()?.toString() ?? "",
           teacherNameShort: $(this).find(".subject-teacher-short-input").val()?.toString() ?? "",
           subjectNameSubstitution: $(this).find(".subject-name-substitution-input").val()?.toString()?.split(",").map(v => v.trim()) ?? [],

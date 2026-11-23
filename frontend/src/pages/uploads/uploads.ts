@@ -26,6 +26,19 @@ import { richTextToHtml, richTextToPlainText } from "../../snippets/richTextarea
 import { FileInput, SearchBox } from "../../snippets/richInput/richInput.js";
 import { FileViewer } from "../../snippets/fileViewer/fileViewer.js";
 
+// maps errorReason of failed uploads (set by backend upload worker) to readable message
+function uploadFailedReasonText(errorReason: string | null): string {
+  return {
+    "MIME-Type is not supported": "Einer der Dateitypen wird nicht unterstützt!",
+    "File upload rejected: A potential threat was detected in the uploaded file":
+      "Eine der Dateien wurde als potenziell schädlich erkannt.",
+    "Invalid text file encoding": "Eine der Textdateien ist nicht UTF-8-kodiert.",
+    "File already deleted or moved": "Der Upload wurde während der Verarbeitung gelöscht.",
+    "processing_timeout": "Die Verarbeitung hat zu lange gedauert. Bitte versuche es erneut.",
+    "queue_failed": "Der Upload konnte nicht verarbeitet werden. Bitte versuche es erneut."
+  }[errorReason ?? ""] ?? "Ein unbekannter Fehler ist aufgetreten. Bitte versuche es erneut.";
+}
+
 async function renderUploadList(): Promise<void> {
   async function getFilteredData(): Promise<SingleUploadData[]> {
     // Get the upload data
@@ -185,9 +198,7 @@ async function renderUploadList(): Promise<void> {
       </div>
       `);
     galleryTemplate.find(".upload-failed").toggle(upload.status === "failed");
-    galleryTemplate.find(".upload-failed-reason").text({
-      "MIME-Type is not supported": "Einer der Dateitypen wird nicht unterstützt!"
-    }[upload.errorReason ?? ""] ?? "Ein unbekannter Fehler ist aufgetreten.");
+    galleryTemplate.find(".upload-failed-reason").text(uploadFailedReasonText(upload.errorReason));
     galleryTemplate.find(".upload-processing").toggle(["processing", "queued"].includes(upload.status));
     galleryTemplate.find(".view-upload").prop("disabled", upload.status !== "completed");
 
@@ -230,9 +241,7 @@ async function renderUploadList(): Promise<void> {
       </tr>
     `);
     tableTemplate.find(".upload-failed").toggle(upload.status === "failed");
-    tableTemplate.find(".upload-failed-reason").text({
-      "MIME-Type is not supported": "Einer der Dateitypen wird nicht unterstützt!"
-    }[upload.errorReason ?? ""] ?? "Ein unbekannter Fehler ist aufgetreten.");
+    tableTemplate.find(".upload-failed-reason").text(uploadFailedReasonText(upload.errorReason));
     tableTemplate.find(".upload-processing").toggle(["processing", "queued"].includes(upload.status));
     tableTemplate.find(".view-upload").prop("disabled", upload.status !== "completed");
 
@@ -435,7 +444,9 @@ async function manageUpload(mode: "add" | "edit", upload: Partial<SingleUploadDa
     data.append("uploadType", type);
     data.append("teamId", teamId);
     for (const f of files) {
-      data.append("files", f);
+      // iOS/iPadOS WebKit can send disk-backed Files from picker truncated ("Unexpected end of form" on server)
+      // fix: copy bytes into memory first
+      data.append("files", new File([await f.arrayBuffer()], f.name, { type: f.type }));
     }
 
     const ajaxPromise = mode === "add"

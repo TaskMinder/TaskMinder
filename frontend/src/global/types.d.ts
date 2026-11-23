@@ -128,7 +128,7 @@ type SubjectData = {
   subjectNameLong: string;
   subjectNameShort: string;
   subjectNameSubstitution: string[] | null;
-  teacherGender: "d" | "w" | "m";
+  teacherGender: "d" | "f" | "m";
   teacherNameLong: string;
   teacherNameShort: string;
   teacherNameSubstitution: string[] | null;
