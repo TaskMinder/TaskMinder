@@ -1,7 +1,7 @@
 import session from "express-session";
 import type { SessionData } from "express-session";
 import logger from "./logger.js";
-import { BigIntreplacer } from "../utils/validate.functions.js";
+import { BigIntreplacer } from "../utils/common.functions.js";
 
 export const sessionTTLSeconds = 30 * 24 * 60 * 60; // 30 days
 

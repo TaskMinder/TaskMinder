@@ -54,9 +54,8 @@ You're all set - **Have fun!**
 - **Sass** - CSS preprocessor for maintainable stylesheets
 
 ## License
-TaskMinder is licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only).
-Copyright © 2024–2026 Mingqi Li and Fabian Leonardi.
-See [LICENSE](./LICENSE) for details.
+TaskMinder is licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only). <br>
+Copyright © 2024–2026 Mingqi Li and Fabian Leonardi. See [LICENSE](./LICENSE) for details.
 
 ## Links
 - Contact us! [info@taskminder.de](mailto:info@taskminder.de)

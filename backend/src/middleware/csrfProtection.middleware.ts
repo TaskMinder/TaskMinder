@@ -38,6 +38,21 @@ export function ensureCsrfSessionToken(req: Request): string {
   return req.session.csrfToken;
 }
 
+// GET handler for token; only pages of this site may read it
+export function sendCsrfToken(req: Request, res: Response): void {
+  const secFetchSite = req.header("sec-fetch-site");
+  if (secFetchSite && !["same-origin", "same-site", "none"].includes(secFetchSite)) {
+    res.status(403).json({ message: "Forbidden" });
+    return;
+  }
+  const csrfToken = ensureCsrfSessionToken(req);
+  res
+    .set("Cache-Control", "no-store, no-cache, must-revalidate, private")
+    .set("Pragma", "no-cache")  // HTTP/1.0 compat
+    .set("Surrogate-Control", "no-store")
+    .json({ csrfToken });
+}
+
 export function csrfProtection(req: Request, res: Response, next: NextFunction): void {
   function getProvidedToken(): unknown {
     const tokenFromHeader = req.headers["x-csrf-token"] as string | undefined;

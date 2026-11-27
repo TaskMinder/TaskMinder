@@ -8,8 +8,8 @@ import {
   changeUsernameSchema, 
   checkUsernameSchema, 
   deleteAccountSchema, 
-  loginAccountSchema, 
-  registerAccountSchema 
+  loginAccountSchema,
+  registerAccountSchema
 } from "../schemas/account.schema.js";
 
 // account rate limiter
@@ -19,11 +19,11 @@ const router = express.Router();
 
 router.post("/register", authLimiter, validate(registerAccountSchema), userController.registerAccount);
 router.post("/login", authLimiter, validate(loginAccountSchema), userController.loginAccount);
-router.delete("/me", authLimiter, checkAccess(["ACCOUNT"]), validate(deleteAccountSchema), userController.deleteAccount);
+router.delete("/me", authLimiter, checkAccess(["ACCOUNT"], { allowBanned: true }), validate(deleteAccountSchema), userController.deleteAccount);
 router.patch("/username", authLimiter, checkAccess(["ACCOUNT"]), validate(changeUsernameSchema), userController.changeUsername);
 router.patch("/password", authLimiter, checkAccess(["ACCOUNT"]), validate(changePasswordSchema), userController.changePassword);
 router.get("/auth", authLimiter, userController.getAuth);
-router.post("/logout", authLimiter, checkAccess(["ACCOUNT"]), userController.logoutAccount);
+router.post("/logout", authLimiter, checkAccess(["ACCOUNT"], { allowBanned: true }), userController.logoutAccount);
 router.get("/check-username", authLimiter, validate(checkUsernameSchema), userController.checkUsername);
 
 export default router;

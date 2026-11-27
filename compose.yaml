@@ -30,6 +30,8 @@ services:
       - encryption_key_secondary
       - encryption_key_lookup
       - proxy_hop
+      - brevo_api_key
+      - moderation_password
     depends_on:
       postgres:
         condition: service_healthy
@@ -163,6 +165,10 @@ secrets:
     file: ./docker_secrets/encryption_key_lookup.txt
   proxy_hop:
     file: ./docker_secrets/proxy_hop.txt
+  brevo_api_key:
+    file: ./docker_secrets/brevo_api_key.txt
+  moderation_password:
+    file: ./docker_secrets/moderation_password.txt
 
 volumes:
   postgres-data:

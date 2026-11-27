@@ -84,7 +84,7 @@ export class EncryptionManager {
     return `${ENCRYPTION_PREFIX}${iv.toString("base64")}:${tag.toString("base64")}:${ciphertext.toString("base64")}`;
   }
 
-  private decryptWithKeys(payload: string, keys: Buffer[]): string {
+  private decryptWithKeys(payload: string, keys: Buffer[], { logFailure = true } = {}): string {
     if (!this.isEncrypted(payload)) {
       return payload;
     }
@@ -113,7 +113,9 @@ export class EncryptionManager {
         continue;
       }
     }
-    logger.error("Unable to decrypt payload with available keys.");
+    if (logFailure) {
+      logger.error("Unable to decrypt payload with available keys.");
+    }
     throw new Error("Unable to decrypt payload with available keys.");
   }
 
@@ -123,6 +125,20 @@ export class EncryptionManager {
 
   decryptWithSecondary(payload: string): string {
     return this.decryptWithKeys(payload, this.secondaryEncKeys);
+  }
+
+  // for key rotation: tells whether payload is under the current primary key (decrypt() cannot, it falls back
+  // to secondary); null when it is not (old key, plaintext or malformed), which rotation expects, so nothing is logged
+  decryptWithPrimaryOnly(payload: string): string | null {
+    if (!this.isEncrypted(payload)) {
+      return null;
+    }
+    try {
+      return this.decryptWithKeys(payload, [this.primaryEncKey], { logFailure: false });
+    }
+    catch {
+      return null;
+    }
   }
 }
 

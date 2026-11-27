@@ -34,6 +34,15 @@ export const emitSocketToClass = (classId: number, socketEvent: socketEvent): vo
   io.to(`class:${classId}`).emit(socketEvent);
 };
 
+function accountRoom(accountId: number): string {
+  return `account:${accountId}`;
+}
+
+// on ban: account's open sockets leave class room; reconnecting refused while banned
+export const disconnectAccountSockets = (accountId: number): void => {
+  getIO().in(accountRoom(accountId)).disconnectSockets(true);
+};
+
 // Initialize the Socket.IO instance
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const initialize = (server: http.Server, sessionMiddleware: any): socketIo.Server => {
@@ -53,12 +62,31 @@ export const initialize = (server: http.Server, sessionMiddleware: any): socketI
     // Access session and join class room if classId exists
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const session = (socket.request as any).session;
+    if (session.account) {
+      // joined before ban check: moderation disconnects account's sockets when banning,
+      // so a ban that commits after the check below still reaches this socket
+      socket.join(accountRoom(session.account.accountId));
+      // banned account gets no class updates; server-side disconnect is not retried by client
+      const account = await prisma.account.findUnique({
+        where: { accountId: session.account.accountId },
+        select: { bannedAt: true }
+      });
+      if (account && account.bannedAt !== null) {
+        socket.disconnect(true);
+        return;
+      }
+    }
     if (session.classId) {
       const classExists = await prisma.class.findUnique({
         where: { classId: parseInt(session.classId, 10) },
         select: { classId: true }
       });
 
+      // socket may have gone during the awaits above (ban disconnected it, client left):
+      // joining then would leave the room an entry for a socket that no longer exists
+      if (socket.disconnected) {
+        return;
+      }
       if (classExists) {
         socket.join(`class:${session.classId}`);
         logger.info(`user ${socket.id} joined class room: ${session.classId}`, { isSocket: true });

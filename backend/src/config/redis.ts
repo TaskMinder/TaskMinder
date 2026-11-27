@@ -1,8 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { createClient } from "redis";
 import logger from "../config/logger.js";
 import { RedisStore } from "./redis.session.js";
 import { envConfig } from "./env.js";
-import { BigIntreplacer } from "../utils/validate.functions.js";
+import { BigIntreplacer } from "../utils/common.functions.js";
 
 export const CACHE_KEY_PREFIXES = {
   HOMEWORK: "homework_data",
@@ -122,6 +123,23 @@ export const disconnectRedis = async (): Promise<void> => {
     logger.error("Unknown error disconnecting from Redis!");
     throw new Error("Redis disconnect failed", { cause: err });
   }
+};
+
+// token of lock when free, null when held; caller frees with releaseLock, ttl only covers crash
+export const acquireLock = async (key: string, ttlSeconds: number): Promise<string | null> => {
+  const token = randomUUID();
+  const acquired = await redisClient.set(key, token, { expiration: { type: "EX", value: ttlSeconds }, condition: "NX" });
+  return acquired === null ? null : token;
+};
+
+// deletes key only while still holds token,
+// so holder that ran past ttl cannot free lock of next holder
+const RELEASE_LOCK_SCRIPT = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) end return 0";
+
+// never throws: called in `finally`, where an error would hide the caller's own; ttl frees the lock then
+export const releaseLock = async (key: string, token: string): Promise<void> => {
+  await redisClient.eval(RELEASE_LOCK_SCRIPT, { keys: [key], arguments: [token] })
+    .catch(error => logger.error(`Failed to release lock ${key}, it expires with its ttl: ${error}`));
 };
 
 export const queueJob = async (queueKey: string, jobData: unknown): Promise<void> => {

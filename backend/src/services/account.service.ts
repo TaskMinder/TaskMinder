@@ -12,10 +12,12 @@ import {
   registerAccountTypeBody
 } from "../schemas/account.schema.js";
 import { invalidateCache } from "../config/redis.js";
+import { banStatement } from "../utils/moderation.statements.js";
 
 const SALTROUNDS = 10;
 
 export default {
+  // eslint-disable-next-line complexity
   async getAuth(session: Session & Partial<SessionData>) {
     type AuthResponse = {
       loggedIn: boolean;
@@ -26,6 +28,7 @@ export default {
         username: string;
       };
       permissionLevel?: number;
+      ban?: { bannedAt: number; statement: string };
     };
 
     if (!session) {
@@ -42,7 +45,7 @@ export default {
     if (session.account) {
       const accountInDb = await prisma.account.findFirst({
         where: { accountId: session.account.accountId, deletedAt: null },
-        select: { accountId: true, username: true }
+        select: { accountId: true, username: true, bannedAt: true, banGround: true, banReason: true }
       });
 
       if (accountInDb) {
@@ -50,6 +53,14 @@ export default {
         accountIdInDatabase = accountInDb.accountId;
         res.account = { username: accountInDb.username, accountId: accountIdInDatabase };
         session.account = { accountId: accountInDb.accountId, username: accountInDb.username };
+        // banned account stays logged in without its class
+        // -> can log out and delete account, and sees the statement of reasons
+        if (accountInDb.bannedAt !== null) {
+          delete session.classId;
+          const bannedAt = Number(accountInDb.bannedAt);
+          res.ban = { bannedAt, statement: banStatement({ ...accountInDb, bannedAt }) };
+          return res;
+        }
       }
       else {
         delete session.account;
@@ -205,6 +216,11 @@ export default {
     }
     const accountId = account.accountId;
     session.account = { username, accountId };
+    // banned account logs in without class
+    if (account.bannedAt !== null) {
+      delete session.classId;
+      return;
+    }
 
     const joinedClassExists = await prisma.joinedClass.findUnique({
       where: {
@@ -270,8 +286,10 @@ export default {
         accountId
       }
     });
-    // if user is in a class, evaluate if user is admin
-    if (joinedClassAccount) {
+    // if user is in a class, evaluate if user is admin;
+    // banned account cannot leave its class first, so it may delete itself anyway
+    // (a ban takes its admin role; a class keeps an active admin besides a banned one)
+    if (joinedClassAccount && account.bannedAt === null) {
       if (joinedClassAccount.permissionLevel === 3) {
         const err: RequestError = {
           name: "Conflict",

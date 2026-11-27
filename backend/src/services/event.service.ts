@@ -7,10 +7,10 @@ import {
   isValidColor,
   isValidTeamId,
   lessonDateEventAtLeastOneNull,
-  BigIntreplacer,
   isValidEventTypeId,
   dateChecker
 } from "../utils/validate.functions.js";
+import { BigIntreplacer } from "../utils/common.functions.js";
 import { invalidateCache, updateCacheData } from "../config/redis.js";
 import { assertPermissionLevel, ROLES } from "../middleware/access.middleware.js";
 import { Session, SessionData } from "express-session";
@@ -51,9 +51,10 @@ type SortableEvent = {
   [key: string]: unknown;
 };
 
-// in-memory comparator mirroring EVENT_ORDER_BY, used when merging the shared
-// and personal partitions read from the cache into a single ordered list
+// in-memory comparator mirroring EVENT_ORDER_BY, used when merging shared
+// and personal partitions read from the cache into single ordered list
 // (nullable endDate/description sort last, matching Postgres NULLS LAST on ASC)
+// eslint-disable-next-line complexity
 function compareEvent(a: SortableEvent, b: SortableEvent): number {
   if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
   const startA = Number(a.startDate), startB = Number(b.startDate);
@@ -148,6 +149,14 @@ async function authorizeEventMutation(
   await assertPermissionLevel(session, ROLES.EDITOR);
 }
 
+// after an event was deleted, shared by deleteEvent and moderation (after its decision transaction)
+export async function announceEventRemoval(classId: number, ownerAccountId: number | null): Promise<void> {
+  // invalidate cache
+  await invalidateCache(CACHE_KEY_PREFIXES.EVENT, classId.toString(), ownerAccountId?.toString());
+  // send socket event
+  emitSocketToClass(classId, SOCKET_EVENTS.EVENTS);
+}
+
 export const eventService = {
   async getEventData(session: Session & Partial<SessionData>) {
     // always use classId instead of session.classId (session.classId can change during concurrent requests)
@@ -158,7 +167,7 @@ export const eventService = {
     const sharedKey = generateCacheKey(CACHE_KEY_PREFIXES.EVENT, session.classId!);
     const shared = await fetchEventPartition(sharedKey, { classId, accountId: null });
 
-    // anonymous / no-account viewers only ever see shared events
+    // anonymous/no-account viewers only ever see shared events
     if (accountId === undefined) {
       return shared;
     }
@@ -167,7 +176,7 @@ export const eventService = {
     const personalKey = generateCacheKey(CACHE_KEY_PREFIXES.EVENT, session.classId!, accountId.toString());
     const personal = await fetchEventPartition(personalKey, { classId, accountId });
 
-    // merge the two partitions and re-sort to preserve canonical order
+    // merge two partitions and re-sort to preserve canonical order
     return [...shared, ...personal].sort(compareEvent);
   },
 
@@ -246,6 +255,7 @@ export const eventService = {
     await isValidEventTypeId(eventTypeId, session);
     // authorize + resolve owner/team for shared vs personal
     const { accountId, storedTeamId } = await resolveEventScope(isPersonal, teamId, session);
+    const creatorAccountId = session.account?.accountId ?? null;
     try {
       await prisma.event.create({
         data: {
@@ -259,6 +269,8 @@ export const eventService = {
           endDate: endDate,
           teamId: storedTeamId,
           accountId: accountId,
+          authorAccountId: creatorAccountId,
+          lastEditorAccountId: creatorAccountId,
           createdAt: BigInt(Date.now())
         }
       });
@@ -294,6 +306,7 @@ export const eventService = {
     emitSocketToClass(classId, SOCKET_EVENTS.EVENTS);
   },
 
+  // eslint-disable-next-line complexity
   async editEvent(
     reqParams: editEventTypeParams,
     reqBody: editEventTypeBody,
@@ -345,7 +358,9 @@ export const eventService = {
           lesson: lesson,
           endDate: endDate,
           teamId: storedTeamId,
-          accountId: newAccountId
+          accountId: newAccountId,
+          // the original author stays; an anonymous edit leaves no editor
+          lastEditorAccountId: session.account?.accountId ?? null
         }
       });
       // if affected rows is 0 -> throw error
@@ -423,11 +438,7 @@ export const eventService = {
         classId
       }
     });
-
-    // invalidate cache
-    await invalidateCache(CACHE_KEY_PREFIXES.EVENT, classId.toString(), existing.accountId?.toString());
-    // send socket event
-    emitSocketToClass(classId, SOCKET_EVENTS.EVENTS);
+    await announceEventRemoval(classId, existing.accountId);
   },
 
   async getEventTypeData(session: Session & Partial<SessionData>) {

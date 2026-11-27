@@ -1,7 +1,8 @@
 import { redisClient, CACHE_KEY_PREFIXES, generateCacheKey } from "../config/redis.js";
 import { emitSocketToClass, SOCKET_EVENTS } from "../config/socket.js";
 import { prisma } from "../config/prisma.js";
-import { isValidTeamId, BigIntreplacer, isValidSubjectId, dateChecker } from "../utils/validate.functions.js";
+import { isValidTeamId, isValidSubjectId, dateChecker } from "../utils/validate.functions.js";
+import { BigIntreplacer } from "../utils/common.functions.js";
 import { updateCacheData, invalidateCache } from "../config/redis.js";
 import { assertPermissionLevel, ROLES } from "../middleware/access.middleware.js";
 import { Session, SessionData } from "express-session";
@@ -94,7 +95,7 @@ async function resolveHomeworkScope(
       };
       throw err;
     }
-    // ensure the account actually belongs to this class (also repairs stale session state)
+    // ensure account actually belongs to this class (also repairs stale session state)
     await assertPermissionLevel(session, ROLES.MEMBER);
     return { accountId: session.account.accountId, storedTeamId: PERSONAL_TEAM_ID };
   }
@@ -126,6 +127,14 @@ async function authorizeHomeworkMutation(
   await assertPermissionLevel(session, ROLES.EDITOR);
 }
 
+// after a homework was deleted, shared by deleteHomework and moderation (after its decision transaction)
+export async function announceHomeworkRemoval(classId: number, ownerAccountId: number | null): Promise<void> {
+  // invalidate cache
+  await invalidateCache(CACHE_KEY_PREFIXES.HOMEWORK, classId.toString(), ownerAccountId?.toString());
+  // send socket update
+  emitSocketToClass(classId, SOCKET_EVENTS.HOMEWORK);
+}
+
 const homeworkService = {
   async addHomework(
     reqBody: addHomeworkTypeBody,
@@ -139,6 +148,7 @@ const homeworkService = {
     await isValidSubjectId(subjectId, session);
     // authorize + resolve owner/team for shared vs personal
     const { accountId, storedTeamId } = await resolveHomeworkScope(isPersonal, teamId, session);
+    const creatorAccountId = session.account?.accountId ?? null;
     try {
       await prisma.homework.create({
         data: {
@@ -150,6 +160,8 @@ const homeworkService = {
           submissionDate: submissionDate,
           teamId: storedTeamId,
           accountId: accountId,
+          authorAccountId: creatorAccountId,
+          lastEditorAccountId: creatorAccountId,
           createdAt: BigInt(Date.now())
         }
       });
@@ -277,13 +289,10 @@ const homeworkService = {
         classId
       }
     });
-
-    // invalidate cache
-    await invalidateCache(CACHE_KEY_PREFIXES.HOMEWORK, classId.toString(), existing.accountId?.toString());
-    // send socket update
-    emitSocketToClass(classId, SOCKET_EVENTS.HOMEWORK);
+    await announceHomeworkRemoval(classId, existing.accountId);
   },
 
+  // eslint-disable-next-line complexity
   async editHomework(
     reqParams: editHomeworkTypeParams,
     reqBody: editHomeworkTypeBody,
@@ -330,7 +339,9 @@ const homeworkService = {
           assignmentDate: assignmentDate,
           submissionDate: submissionDate,
           teamId: storedTeamId,
-          accountId: newAccountId
+          accountId: newAccountId,
+          // the original author stays; an anonymous edit leaves no editor
+          lastEditorAccountId: session.account?.accountId ?? null
         }
       });
 
@@ -389,7 +400,7 @@ const homeworkService = {
     const sharedKey = generateCacheKey(CACHE_KEY_PREFIXES.HOMEWORK, session.classId!);
     const shared = await fetchHomeworkPartition(sharedKey, { classId, accountId: null });
 
-    // anonymous / no-account viewers only ever see shared homework
+    // anonymous/no-account viewers only ever see shared homework
     if (accountId === undefined) {
       return shared;
     }
@@ -398,7 +409,7 @@ const homeworkService = {
     const personalKey = generateCacheKey(CACHE_KEY_PREFIXES.HOMEWORK, session.classId!, accountId.toString());
     const personal = await fetchHomeworkPartition(personalKey, { classId, accountId });
 
-    // merge the two partitions and re-sort to preserve the canonical order
+    // merge two partitions and re-sort to preserve canonical order
     return [...shared, ...personal].sort(compareHomework);
   },
 

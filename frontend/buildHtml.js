@@ -160,7 +160,7 @@ async function buildDirectory(src, dest) {
       const relativePath = relative(sourceDir, srcFile);
       const pathSegments = relativePath.split(sep);
 
-      if (pathSegments[0] === "pages" && fileName !== "landing") {
+      if (pathSegments[0] === "pages" && !["landing", "moderation"].includes(fileName)) {
         await buildHtmlFile();
       }
       else {

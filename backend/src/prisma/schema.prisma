@@ -13,6 +13,10 @@ model Account {
   password      String
   deletedAt     BigInt?
   createdAt     BigInt?
+  bannedAt      BigInt?
+  // part of the statement of reasons
+  banGround     DecisionGround?
+  banReason     String?
 
   HomeworkCheck HomeworkCheck[]
   JoinedClass   JoinedClass?
@@ -21,6 +25,14 @@ model Account {
   // personal (account-scoped) homework and events; null accountId on these models means shared
   Homework      Homework[]
   Event         Event[]
+  // private authorship of shared and personal items, never returned in API responses
+  AuthoredHomework   Homework[] @relation("HomeworkAuthor")
+  EditedHomework     Homework[] @relation("HomeworkEditor")
+  AuthoredEvents     Event[]    @relation("EventAuthor")
+  EditedEvents       Event[]    @relation("EventEditor")
+  EditedUploads      Upload[]   @relation("UploadEditor")
+  ReportsAgainst    Report[]   @relation("ReportTarget")
+  ReportsAsEditor    Report[]   @relation("ReportEditor")
 
   // FIXME: account_username_unique_active_key partial index for
   // deletedAt and username; manual migration in: improve_schema 20251121
@@ -43,16 +55,24 @@ model Event {
   // null = shared (team-scoped) event; set = personal event owned by this account
   accountId   Int?
   createdAt   BigInt?
+  // account that created it, never changes; null after an anonymous create
+  authorAccountId     Int?
+  // last account that created or edited it; null after an anonymous edit
+  lastEditorAccountId Int?
 
   EventType   EventType @relation(fields: [eventTypeId], references: [eventTypeId], onDelete: Cascade, onUpdate: NoAction)
   Class       Class     @relation(fields: [classId], references: [classId], onDelete: Cascade, onUpdate: NoAction)
   Account     Account?  @relation(fields: [accountId], references: [accountId], onDelete: Cascade, onUpdate: NoAction)
+  Author      Account?  @relation("EventAuthor", fields: [authorAccountId], references: [accountId], onDelete: SetNull, onUpdate: NoAction)
+  LastEditor  Account?  @relation("EventEditor", fields: [lastEditorAccountId], references: [accountId], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([classId])
   @@index([teamId])
   @@index([startDate, classId])
   @@index([classId, isPinned, startDate])
   @@index([classId, accountId])
+  @@index([authorAccountId])
+  @@index([lastEditorAccountId])
   @@map("event")
 }
 
@@ -97,6 +117,7 @@ model Class {
   Team                    Team[]
   Files                   Upload[]
   UploadRequest           UploadRequest[]
+  Report                  Report[]
 
   @@index([isTestClass, createdAt])
   @@map("class")
@@ -114,17 +135,25 @@ model Homework {
   // null = shared (team-scoped) homework; set = personal homework owned by this account
   accountId      Int?
   createdAt      BigInt?
+  // account that created it, never changes; null after an anonymous create
+  authorAccountId     Int?
+  // last account that created or edited it; null after an anonymous edit
+  lastEditorAccountId Int?
 
   HomeworkCheck  HomeworkCheck[]
 
   Class          Class           @relation(fields: [classId], references: [classId], onDelete: Cascade, onUpdate: NoAction)
   Account        Account?        @relation(fields: [accountId], references: [accountId], onDelete: Cascade, onUpdate: NoAction)
+  Author         Account?        @relation("HomeworkAuthor", fields: [authorAccountId], references: [accountId], onDelete: SetNull, onUpdate: NoAction)
+  LastEditor     Account?        @relation("HomeworkEditor", fields: [lastEditorAccountId], references: [accountId], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([classId])
   @@index([teamId])
   @@index([submissionDate, classId])
   @@index([classId, isPinned, submissionDate])
   @@index([classId, accountId])
+  @@index([authorAccountId])
+  @@index([lastEditorAccountId])
   @@map("homework")
 }
 
@@ -251,12 +280,17 @@ model Upload {
   createdAt           BigInt  // When the upload job was created
 
   teamId              Int
+  // uploader of the current files
   accountId           Int?
   classId             Int
+  // private, for moderation: last account that uploaded or edited it (also only name or description);
+  // null after anonymous edit
+  lastEditorAccountId Int?
 
   Files               FileMetadata[]
 
   Account             Account?   @relation(fields: [accountId], references: [accountId], onDelete: SetNull, onUpdate: NoAction)
+  LastEditor          Account?   @relation("UploadEditor", fields: [lastEditorAccountId], references: [accountId], onDelete: SetNull, onUpdate: NoAction)
   Class               Class      @relation(fields: [classId], references: [classId], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([classId])
@@ -264,6 +298,7 @@ model Upload {
   @@index([classId, teamId, createdAt])
   @@index([classId, isPinned(sort: Desc), createdAt(sort: Desc), uploadName, uploadId(sort: Desc)])
   @@index([status, createdAt])
+  @@index([lastEditorAccountId])
   @@map("upload")
 }
 
@@ -278,4 +313,90 @@ model UploadRequest {
   @@index([classId])
   @@index([teamId])
   @@map("uploadRequest")
+}
+
+enum ReportTargetType {
+  homework
+  event
+  upload
+  account
+}
+
+enum ReportCategory {
+  illegal
+  harassment
+  hate
+  sexual
+  spam
+  privacy
+  other
+}
+
+enum ModerationAction {
+  dismiss
+  remove
+  ban
+  remove_and_ban
+  rotate_class_code
+}
+
+// "terms": terms of use no. 3, "illegal": law named in reason (statement of reasons, DSA Art. 17(3)(d), (e))
+enum DecisionGround {
+  terms
+  illegal
+}
+
+model Report {
+  reportId          Int               @id @default(autoincrement())
+  classId           Int?
+  targetType        ReportTargetType
+  targetId          Int
+  // author at report time (original homework/event author, uploader or reported account)
+  targetAccountId   Int?
+  // last editor at report time (homework, events, uploads): same as targetAccountId when author edited last,
+  // null after anonymous edit
+  editorAccountId   Int?
+  // "account:<id>" or "session:<hash of the session id>", used for dedupe
+  // FIXME: report_open_reporter_target_key partial unique index (reporterKey, targetType, targetId) for
+  // open reports; manual migration in: add_moderation 20261124 (like account_username_unique_active_key)
+  reporterKey       String
+  // optional email, encrypted with encryption manager
+  reporterContact   String?
+  category          ReportCategory
+  description       String?
+  // content at report time, never file bytes
+  snapshot          Json
+  action            ModerationAction?
+  // null for dismissed reports
+  decisionGround    DecisionGround?
+  decisionReason    String?
+  // null while report is open
+  resolvedAt        BigInt?
+  createdAt         BigInt
+
+  Class             Class?   @relation(fields: [classId], references: [classId], onDelete: SetNull, onUpdate: NoAction)
+  TargetAccount     Account? @relation("ReportTarget", fields: [targetAccountId], references: [accountId], onDelete: SetNull, onUpdate: NoAction)
+  EditorAccount     Account? @relation("ReportEditor", fields: [editorAccountId], references: [accountId], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([targetType, targetId])
+  @@index([targetAccountId])
+  @@index([editorAccountId])
+  @@index([classId])
+  @@index([resolvedAt])
+  @@map("report")
+}
+
+// mails reporters are owed (receipt DSA Art. 16(4), decision Art. 16(5)), queued in the transaction that makes them due;
+// sent and retried by mail queue, deleted once sent
+model MailQueue {
+  mailId          Int     @id @default(autoincrement())
+  // encrypted with encryption manager
+  recipient       String
+  subject         String
+  text            String
+  nextAttemptAt   BigInt
+  createdAt       BigInt
+
+  @@index([nextAttemptAt])
+  @@map("mailQueue")
 }

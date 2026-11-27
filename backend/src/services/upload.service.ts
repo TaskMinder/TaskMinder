@@ -3,7 +3,7 @@ import path from "path";
 import { FINAL_UPLOADS_DIR, MAX_FILE_SIZE, MAX_FILES_PER_CLASS, MIME_CANONICAL_ALIASES } from "../config/upload.js";
 import fs from "fs/promises";
 import { ReadStream, createReadStream } from "fs";
-import { prisma } from "../config/prisma.js";
+import { Db, prisma } from "../config/prisma.js";
 import { Prisma } from "../prisma/generated/prisma/client.js";
 import logger from "../config/logger.js";
 import { RequestError } from "../@types/requestError.js";
@@ -21,11 +21,12 @@ import {
 } from "../schemas/upload.schema.js";
 import { removeTempFiles } from "../utils/upload.cleanup.js";
 import { queueJob, QUEUE_KEYS, generateCacheKey, CACHE_KEY_PREFIXES, redisClient } from "../config/redis.js";
-import { BigIntreplacer, isValidTeamId } from "../utils/validate.functions.js";
+import { isValidTeamId } from "../utils/validate.functions.js";
+import { BigIntreplacer, throwError } from "../utils/common.functions.js";
 import { invalidateCache, updateCacheData } from "../config/redis.js";
 import { emitSocketToClass, SOCKET_EVENTS } from "../config/socket.js";
 
-type GetUploadFileResult = {
+export type GetUploadFileResult = {
   stream: ReadStream;
   headers: {
     "Content-Type": string;
@@ -65,6 +66,133 @@ const mapUploadData = (uploads: Awaited<ReturnType<typeof prisma.upload.findMany
   }));
 };
 
+type RemovableUpload = Pick<
+  Prisma.UploadGetPayload<{ include: { Files: true } }>,
+  "uploadId" | "classId" | "status" | "reservedBytes" | "Files"
+>;
+
+// session-free removal (shared by deleteUpload and moderation), deletes record and releases storage;
+// false when upload was deleted in parallel since caller read it (delete itself is existence check,
+// so storage is released once and caller does not announce removal twice)
+export async function deleteUploadRecord(db: Db, uploadData: RemovableUpload): Promise<boolean> {
+  const { uploadId, classId } = uploadData;
+
+  // Calculate actual size (for completed uploads) or reserved size (for failed/queued)
+  const sizeToRelease = uploadData.status === "completed"
+    ? BigInt(uploadData.Files.reduce((sum, file) => sum + BigInt(file.size), 0n))
+    : uploadData.reservedBytes;
+
+  // Delete upload record
+  const { count } = await db.upload.deleteMany({
+    where: { uploadId, classId }
+  });
+  if (count === 0) {
+    return false;
+  }
+
+  // Update class storage usage
+  if (sizeToRelease > 0n) {
+    await db.class.update({
+      where: { classId },
+      data: { storageUsedBytes: { decrement: sizeToRelease } }
+    });
+  }
+  return true;
+}
+
+export async function announceUploadRemoval(uploadData: RemovableUpload): Promise<void> {
+  const { classId } = uploadData;
+
+  // Delete all physical files from disk
+  const classDir = path.join(FINAL_UPLOADS_DIR, classId.toString());
+  for (const file of uploadData.Files) {
+    const filePath = path.join(classDir, file.storedFileName);
+    await fs.unlink(filePath).catch(() => {
+      logger.error(`Failed to delete file for classId: ${classId}, filePath: ${filePath} during upload deletion`);
+    });
+  }
+
+  // Invalidate cache after delete
+  await invalidateCache(CACHE_KEY_PREFIXES.UPLOADMETADATA, classId.toString());
+
+  emitSocketToClass(classId, SOCKET_EVENTS.UPLOADS);
+  logger.info(`upload deleted for class: ${classId}`);
+}
+
+// session-free file access, shared by getUploadFile and the moderation panel;
+// the file must belong to the class (and to the upload, when given)
+export async function openUploadFile(
+  fileId: number,
+  scope: { classId: number; uploadId?: number },
+  disposition: "attachment" | "inline"
+): Promise<GetUploadFileResult> {
+  const fileData = await prisma.fileMetadata.findUnique({
+    where: { fileMetaDataId: fileId },
+    include: {
+      Upload: {
+        select: {
+          classId: true,
+          uploadName: true,
+          Files: {
+            select: { fileMetaDataId: true },
+            orderBy: { createdAt: "asc" }
+          }
+        }
+      }
+    }
+  });
+
+  if (!fileData || fileData.Upload.classId !== scope.classId || (scope.uploadId !== undefined && fileData.uploadId !== scope.uploadId)) {
+    throwError("Not Found", 404, "File not found or access denied.");
+  }
+
+  // Get file numbering information
+  const totalFiles = fileData.Upload.Files.length;
+  const fileIndex = fileData.Upload.Files.findIndex(f => f.fileMetaDataId === fileId);
+  const fileNumber = fileIndex + 1;
+
+  // Extract file extension from stored filename
+  const fileExtension = path.extname(fileData.storedFileName);
+
+  // Build filename with numbering if multiple files
+  let filename = fileData.Upload.uploadName;
+  if (totalFiles > 1) {
+    filename += ` (${fileNumber} von ${totalFiles})`;
+  }
+  filename += fileExtension;
+
+  const filenameForHeader = filename.replace(/[\r\n]/g, ""); // Remove newlines that could enable header injection
+  const safeOriginalName = filenameForHeader
+    .replace(/\\/g, "\\\\") // Escape backslashes
+    .replace(/"/g, '\\"');  // Escape quotes
+  const encodedFileName = encodeURIComponent(filenameForHeader);
+
+  const headers = {
+    "Content-Type": normalizeMimeType(fileData.mimeType),
+    "Content-Disposition": `${disposition}; filename="${safeOriginalName}"; filename*=UTF-8''${encodedFileName}`,
+    "Cache-Control": "private, max-age=31536000, immutable"
+  };
+
+  const finalFilePath = path.join(
+    FINAL_UPLOADS_DIR,
+    fileData.Upload.classId.toString(),
+    fileData.storedFileName
+  );
+
+  try {
+    await fs.access(finalFilePath, fs.constants.R_OK);
+  }
+  catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+      logger.error(`File not found on disk: ${finalFilePath}`);
+      throwError("Not Found", 404, "File not found on server.");
+    }
+    throw e;
+  }
+
+  const stream = createReadStream(finalFilePath);
+  return { stream, headers };
+}
 
 const uploadService = {
   // file upload -> queue upload for worker to pick up
@@ -90,6 +218,7 @@ const uploadService = {
         teamId,
         classId,
         accountId,
+        lastEditorAccountId: accountId,
         reservedBytes,
         createdAt: BigInt(Date.now())
       }
@@ -242,90 +371,8 @@ const uploadService = {
     query: getUploadFileQuery,
     session: Session & Partial<SessionData>
   ): Promise<GetUploadFileResult> {
-    const { id: fileIdParam } = params;
-    const { action } = query;
     const classId = parseInt(session.classId!, 10);
-
-    const fileData = await prisma.fileMetadata.findUnique({
-      where: { fileMetaDataId: fileIdParam },
-      include: {
-        Upload: {
-          select: {
-            classId: true,
-            uploadName: true,
-            Files: {
-              select: { fileMetaDataId: true },
-              orderBy: { createdAt: "asc" }
-            }
-          }
-        }
-      }
-    });
-
-    if (!fileData || fileData.Upload.classId !== classId) {
-      const err: RequestError = {
-        name: "Not Found",
-        status: 404,
-        message: "File not found or access denied.",
-        expected: true
-      };
-      throw err;
-    }
-
-    const disposition = action === "download" ? "attachment" : "inline";
-
-    // Get file numbering information
-    const totalFiles = fileData.Upload.Files.length;
-    const fileIndex = fileData.Upload.Files.findIndex(f => f.fileMetaDataId === fileIdParam);
-    const fileNumber = fileIndex + 1;
-
-    // Extract file extension from stored filename
-    const fileExtension = path.extname(fileData.storedFileName);
-
-    // Build filename with numbering if multiple files
-    let filename = fileData.Upload.uploadName;
-    if (totalFiles > 1) {
-      filename += ` (${fileNumber} von ${totalFiles})`;
-    }
-    filename += fileExtension;
-
-    const filenameForHeader = filename.replace(/[\r\n]/g, ""); // Remove newlines that could enable header injection
-    const safeOriginalName = filenameForHeader
-      .replace(/\\/g, "\\\\") // Escape backslashes
-      .replace(/"/g, '\\"');  // Escape quotes
-    const encodedFileName = encodeURIComponent(filenameForHeader);
-
-    const headers = {
-      "Content-Type": normalizeMimeType(fileData.mimeType),
-      "Content-Disposition": `${disposition}; filename="${safeOriginalName}"; filename*=UTF-8''${encodedFileName}`,
-      "Cache-Control": "private, max-age=31536000, immutable"
-    };
-
-    const finalFilePath = path.join(
-      FINAL_UPLOADS_DIR,
-      fileData.Upload.classId.toString(),
-      fileData.storedFileName
-    );
-
-    try {
-      await fs.access(finalFilePath, fs.constants.R_OK);
-    }
-    catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-        logger.error(`File not found on disk: ${finalFilePath}`);
-        const err: RequestError = {
-          name: "Not Found",
-          status: 404,
-          message: "File not found on server.",
-          expected: true
-        };
-        throw err;
-      }
-      throw e;
-    }
-
-    const stream = createReadStream(finalFilePath);
-    return { stream, headers };
+    return await openUploadFile(params.id, { classId }, query.action === "download" ? "attachment" : "inline");
   },
 
   // eslint-disable-next-line complexity
@@ -471,10 +518,10 @@ const uploadService = {
       }
     }
 
-    // update non-file related data later
+    // update non-file related data later; an anonymous edit leaves no editor
     await prisma.upload.update({
       where: { uploadId: uploadId, classId },
-      data: { uploadName, uploadDescription, uploadType, teamId }
+      data: { uploadName, uploadDescription, uploadType, teamId, lastEditorAccountId: accountId }
     });
 
     await invalidateCache(CACHE_KEY_PREFIXES.UPLOADMETADATA, session.classId!);
@@ -507,40 +554,11 @@ const uploadService = {
 
     await isValidTeamId(uploadData.teamId, session);
 
-    // Calculate actual size (for completed uploads) or reserved size (for failed/queued)
-    const sizeToRelease = uploadData.status === "completed"
-      ? BigInt(uploadData.Files.reduce((sum, file) => sum + BigInt(file.size), 0n))
-      : uploadData.reservedBytes;
-
-    await prisma.$transaction(async tx => {
-      // Delete the upload record
-      await tx.upload.delete({
-        where: { uploadId }
-      });
-
-      // Update class storage usage
-      if (sizeToRelease > 0n) {
-        await tx.class.update({
-          where: { classId },
-          data: { storageUsedBytes: { decrement: sizeToRelease } }
-        });
-      }
-    });
-
-    // Delete all physical files from disk
-    const classDir = path.join(FINAL_UPLOADS_DIR, classId.toString());
-    for (const file of uploadData.Files) {
-      const filePath = path.join(classDir, file.storedFileName);
-      await fs.unlink(filePath).catch(() => {
-        logger.error(`Failed to delete file for classId: ${classId}, filePath: ${filePath} during upload deletion`);
-      });
+    // deleted in parallel (double click): same answer as when it was gone before
+    if (!await prisma.$transaction(tx => deleteUploadRecord(tx, uploadData))) {
+      throwError("Not Found", 404, "Upload not found.");
     }
-
-    // Invalidate cache after delete
-    await invalidateCache(CACHE_KEY_PREFIXES.UPLOADMETADATA, session.classId!);
-
-    emitSocketToClass(classId, SOCKET_EVENTS.UPLOADS);
-    logger.info(`upload deleted for class: ${classId}`);
+    await announceUploadRemoval(uploadData);
   },
 
   async pinUpload(

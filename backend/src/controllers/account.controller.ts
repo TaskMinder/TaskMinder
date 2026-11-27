@@ -1,26 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import accountService from "../services/account.service.js";
-
-const regenerateSession = (
-  req: Request,
-  preservedData: { classId?: string; csrfToken?: string }
-): Promise<void> => {
-  return new Promise((resolve, reject) => {
-    req.session.regenerate(err => {
-      if (err) {
-        reject(err);
-        return;
-      }
-      if (preservedData.classId) {
-        req.session.classId = preservedData.classId;
-      }
-      if (preservedData.csrfToken) {
-        req.session.csrfToken = preservedData.csrfToken;
-      }
-      resolve();
-    });
-  });
-};
+import { regenerateSession } from "../config/session.js";
 
 export const registerAccount = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {

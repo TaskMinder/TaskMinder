@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import logger from "../config/logger.js";
-import uploadService from "../services/upload.service.js";
+import uploadService, { type GetUploadFileResult } from "../services/upload.service.js";
 import { getUploadFileQuery } from "../schemas/upload.schema.js";
 
 export const getUploadMetadata = async (
@@ -17,6 +17,33 @@ export const getUploadMetadata = async (
   }
 };
 
+// shared by app and moderation panel, "cacheControl" overrides file's own header
+export function pipeUploadFile(
+  { stream, headers }: GetUploadFileResult,
+  res: Response,
+  next: NextFunction,
+  cacheControl = headers["Cache-Control"]
+): void {
+  res.setHeader("Content-Type", headers["Content-Type"]);
+  res.setHeader("Content-Disposition", headers["Content-Disposition"]);
+  res.setHeader("Cache-Control", cacheControl);
+
+  stream.on("error", err => {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      logger.error("File not found on disk during streaming.");
+      res.status(404).json({ message: "File not found on server." });
+      return;
+    }
+    next(err);
+  });
+  res.on("close", () => {
+    if (!res.writableEnded) {
+      stream.destroy();
+    }
+  });
+  stream.pipe(res);
+}
+
 export const getUploadFile = async (
   req: Request<
     { id: string },
@@ -25,26 +52,8 @@ export const getUploadFile = async (
     getUploadFileQuery
   >, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { stream, headers } = await uploadService.getUploadFile({ id: Number(req.params.id) }, req.query, req.session);
-
-    res.setHeader("Content-Type", headers["Content-Type"]);
-    res.setHeader("Content-Disposition", headers["Content-Disposition"]);
-    res.setHeader("Cache-Control", headers["Cache-Control"]);
-
-    stream.on("error", err => {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        logger.error("File not found on disk during streaming.");
-        res.status(404).json({ message: "File not found on server." });
-        return;
-      }
-      next(err);
-    });
-    res.on("close", () => {
-      if (!res.writableEnded) {
-        stream.destroy();
-      }
-    });
-    stream.pipe(res);
+    const file = await uploadService.getUploadFile({ id: Number(req.params.id) }, req.query, req.session);
+    pipeUploadFile(file, res, next);
   }
   catch (error) {
     next(error);

@@ -4,7 +4,7 @@ import iconv from "iconv-lite";
 import logger from "../config/logger.js";
 import { Session, SessionData } from "express-session";
 import { prisma } from "../config/prisma.js";
-import { BigIntreplacer } from "../utils/validate.functions.js";
+import { BigIntreplacer } from "../utils/common.functions.js";
 
 type SubstitutionData = {
   plan1: { substitutions: unknown; date: string };

@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex" />
+    <title>Moderation · TaskMinder</title>
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon" />
+    <link rel="stylesheet" href="/global/global.css" />
+    <link rel="stylesheet" href="/pages/moderation/moderation.css" />
+    <script src="/vendor/bootstrap/bootstrap.bundle.min.js" defer></script>
+    <script src="/pages/moderation/moderation.js" type="module"></script>
+  </head>
+
+  <body data-bs-theme="light">
+    <!-- not built into app shell: no app navbar, no service worker, no class data -->
+    <nav class="navbar bg-body-tertiary fixed-top">
+      <div class="container-fluid">
+        <div class="d-flex align-items-center">
+          <a class="navbar-text fs-5 text-decoration-none ms-2 me-4" href="/moderation" data-nav>TaskMinder</a>
+          <ul class="navbar-nav flex-row">
+            <li class="nav-item">
+              <a class="nav-link active" href="/moderation" data-nav>Moderation</a>
+            </li>
+          </ul>
+        </div>
+        <div class="d-flex align-items-center" id="session-controls" hidden>
+          <span class="text-body-secondary small me-2" id="login-until"></span>
+          <button class="btn btn-semivisible" id="reload-button" aria-label="Neu laden">
+            <i class="fa-solid fa-rotate" aria-hidden="true"></i>
+          </button>
+          <button class="btn btn-semivisible" id="logout-button" aria-label="Abmelden">
+            <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <div id="app-scroll">
+      <div class="container" id="app">
+        <div class="alert alert-danger p-2 d-none align-items-center gap-2" id="page-error">
+          <i class="fa-solid fa-circle-exclamation mx-1" aria-hidden="true"></i>
+          <span class="d-block" id="page-error-text"></span>
+        </div>
+
+        <!-- Login -->
+        <section class="modal position-static d-block" id="login-view" hidden>
+          <div class="modal-dialog">
+            <form class="modal-content" id="login-form" novalidate>
+              <div class="modal-header">
+                <h1 class="modal-title fs-5">Moderation</h1>
+              </div>
+              <div class="modal-body">
+                <div class="alert alert-primary p-2 d-none align-items-center gap-2" id="login-expired">
+                  <i class="fa-solid fa-clock mx-1" aria-hidden="true"></i>
+                  <span class="d-block">Deine Anmeldung ist abgelaufen. Melde dich neu an, um fortzufahren.</span>
+                </div>
+                <div class="alert alert-danger p-2 d-none align-items-center gap-2" id="login-wrong-password">
+                  <i class="fa-solid fa-circle-exclamation mx-1" aria-hidden="true"></i>
+                  <span class="d-block">Das Passwort ist falsch!</span>
+                </div>
+                <div class="alert alert-danger p-2 d-none align-items-center gap-2" id="login-too-many">
+                  <i class="fa-solid fa-circle-exclamation mx-1" aria-hidden="true"></i>
+                  <span class="d-block">Zu viele Versuche. Probier es zu einem späteren Zeitpunkt noch mal.</span>
+                </div>
+                <label for="login-password" class="form-label">Gib das Moderationspasswort ein</label>
+                <div class="password-field">
+                  <input type="password" class="form-control" id="login-password" autocomplete="current-password" maxlength="256" required />
+                  <button
+                    type="button"
+                    class="btn btn-link p-0 me-2 position-absolute end-0 top-50 translate-middle-y text-secondary"
+                    id="login-password-toggle"
+                    aria-label="Passwort anzeigen"
+                    hidden
+                  >
+                    <i class="far fa-eye" aria-hidden="true"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="submit" class="btn btn-primary fw-bold" id="login-button">Anmelden</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <!-- Overview -->
+        <section id="overview-view" hidden>
+          <div class="nav nav-tabs mb-3" role="tablist">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-open" type="button" role="tab">
+              Offen
+              <span class="badge rounded-pill text-bg-primary ms-1" id="open-count"></span>
+            </button>
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-banned" type="button" role="tab">
+              Gesperrt
+              <span class="badge rounded-pill text-bg-secondary ms-1" id="banned-count"></span>
+            </button>
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-resolved" type="button" role="tab">Entschieden</button>
+            <!-- appeals name report number, older decisions are not in list -->
+            <form class="input-group input-group-sm ms-auto mb-1 align-self-center open-report-form" id="open-report-form">
+              <span class="input-group-text">Meldung #</span>
+              <input class="form-control" type="number" min="1" inputmode="numeric" aria-label="Nummer der Meldung" id="open-report-id" required />
+              <button class="btn btn-outline-secondary fw-bold" type="submit">Öffnen</button>
+            </form>
+          </div>
+
+          <div class="tab-content">
+            <div class="tab-pane fade show active" id="tab-open" role="tabpanel">
+              <p class="text-body-secondary" id="open-empty" hidden>Keine offenen Meldungen.</p>
+              <div class="table-responsive" id="open-table">
+                <table class="table table-hover align-middle">
+                  <thead>
+                    <tr>
+                      <th scope="col">Nr.</th>
+                      <th scope="col">Eingang</th>
+                      <th scope="col">Kategorie</th>
+                      <th scope="col">Inhalt</th>
+                      <th scope="col">Klasse</th>
+                      <th scope="col">Beschreibung</th>
+                    </tr>
+                  </thead>
+                  <tbody id="open-rows"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="tab-pane fade" id="tab-banned" role="tabpanel">
+              <p class="text-body-secondary" id="banned-empty" hidden>Keine gesperrten Konten.</p>
+              <div class="table-responsive" id="banned-table">
+                <table class="table align-middle">
+                  <thead>
+                    <tr>
+                      <th scope="col">Konto</th>
+                      <th scope="col">Gesperrt am</th>
+                      <th scope="col">Grund</th>
+                      <th scope="col">Begründung</th>
+                      <th scope="col"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="banned-rows"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="tab-pane fade" id="tab-resolved" role="tabpanel">
+              <p class="text-body-secondary" id="resolved-empty" hidden>Noch nichts entschieden.</p>
+              <div class="table-responsive" id="resolved-table">
+                <table class="table table-hover align-middle">
+                  <thead>
+                    <tr>
+                      <th scope="col">Nr.</th>
+                      <th scope="col">Entschieden am</th>
+                      <th scope="col">Entscheidung</th>
+                      <th scope="col">Grund</th>
+                      <th scope="col">Begründung</th>
+                    </tr>
+                  </thead>
+                  <tbody id="resolved-rows"></tbody>
+                </table>
+              </div>
+              <div class="form-text">
+                Die letzten 20 Entscheidungen. Ältere öffnest du über ihre Nummer. Sechs Monate nach der Entscheidung werden
+                Meldungen gelöscht.
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- One report -->
+        <section id="report-view" hidden>
+          <div class="d-flex align-items-center gap-2 mb-3">
+            <a class="btn-back" href="/moderation" data-nav aria-label="Zur Übersicht"></a>
+            <h1 class="fs-4 fw-bold mb-0" id="report-title"></h1>
+            <span class="badge rounded-pill" id="report-category"></span>
+          </div>
+
+          <div class="row g-4">
+            <div class="col-lg-6">
+              <h2 class="fs-5 fw-bold">Details</h2>
+              <dl class="row mb-4 report-facts" id="report-facts"></dl>
+
+              <h2 class="fs-5 fw-bold">Inhalt zum Zeitpunkt der Meldung</h2>
+              <pre class="report-snapshot rounded border bg-body-tertiary p-2 mb-0" id="report-snapshot"></pre>
+
+              <!-- decision acts on content as it is now -->
+              <div class="d-flex align-items-center gap-2 mt-4 mb-2">
+                <h2 class="fs-5 fw-bold mb-0">Inhalt jetzt</h2>
+                <span class="badge rounded-pill" id="report-current-status"></span>
+              </div>
+              <pre class="report-snapshot rounded border bg-body-tertiary p-2 mb-0" id="report-current" hidden></pre>
+              <div class="mt-2" id="report-files-group" hidden>
+                <div class="d-flex flex-wrap gap-2" id="report-files"></div>
+                <div class="form-text">Dateien werden nur heruntergeladen, nicht im Browser geöffnet.</div>
+              </div>
+            </div>
+
+            <div class="col-lg-6">
+              <h2 class="fs-5 fw-bold">Entscheidung</h2>
+
+              <div id="report-decided" hidden>
+                <dl class="row mb-2 report-facts" id="report-decision-facts"></dl>
+                <div class="form-text">Widerspricht jemand, prüf die Entscheidung erneut. Eine Sperre hebst du unter „Gesperrt“ auf.</div>
+              </div>
+
+              <form id="decision-form" novalidate hidden>
+                <div class="alert alert-primary p-2 d-flex align-items-center gap-2" id="decision-scope">
+                  <i class="fa-solid fa-circle-info mx-1" aria-hidden="true"></i>
+                  <span class="d-block" id="decision-scope-text"></span>
+                </div>
+
+                <div class="mb-3">
+                  <div class="form-label">Maßnahme</div>
+                  <div class="d-flex flex-wrap gap-2" id="decision-actions"></div>
+                  <div class="form-text" id="decision-action-hint"></div>
+                </div>
+
+                <div class="mb-3" id="decision-ground-group">
+                  <label class="form-label" for="decision-ground">Grund</label>
+                  <select class="form-select" id="decision-ground">
+                    <option value="" selected disabled>Wähle einen Grund</option>
+                    <option value="terms">Verstoß gegen Nr. 3 der Nutzungsbedingungen</option>
+                    <option value="illegal">Rechtswidriger Inhalt</option>
+                  </select>
+                  <div class="form-text">Bei rechtswidrigen Inhalten nennst du in der Begründung das Gesetz, zum Beispiel § 185 StGB.</div>
+                </div>
+
+                <div class="mb-3">
+                  <label class="form-label" for="decision-reason">Begründung</label>
+                  <textarea class="form-control" id="decision-reason" rows="4" maxlength="1000"></textarea>
+                  <div class="form-text" id="decision-reason-hint"></div>
+                </div>
+
+                <div class="mb-3" id="decision-ban-group">
+                  <label class="form-label" for="decision-ban-target">Gesperrt wird</label>
+                  <select class="form-select" id="decision-ban-target"></select>
+                </div>
+
+                <div class="form-check mb-3" id="decision-rotate-group">
+                  <input class="form-check-input" type="checkbox" id="decision-rotate" />
+                  <label class="form-check-label" for="decision-rotate">Auch den Klassencode ändern und alle anonymen Mitglieder abmelden</label>
+                  <div class="form-text" id="decision-rotate-hint"></div>
+                </div>
+
+                <div class="alert alert-danger p-2 d-none align-items-center gap-2" id="decision-error">
+                  <i class="fa-solid fa-circle-exclamation mx-1" aria-hidden="true"></i>
+                  <span class="d-block" id="decision-error-text"></span>
+                </div>
+
+                <button type="submit" class="btn fw-bold" id="decision-submit"></button>
+              </form>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,7 +1,7 @@
 import { prisma } from "../config/prisma.js";
 import { redisClient, STATISTICS_CACHE_KEY, statisticsCacheExpiration } from "../config/redis.js";
 import logger from "../config/logger.js";
-import { BigIntreplacer } from "../utils/validate.functions.js";
+import { BigIntreplacer } from "../utils/common.functions.js";
 
 export type Statistics = {
   registeredClasses: number;

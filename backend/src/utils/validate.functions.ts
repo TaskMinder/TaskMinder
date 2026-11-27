@@ -1,24 +1,9 @@
 import { RequestError } from "../@types/requestError.js";
 import { prisma } from "../config/prisma.js";
 import { Session, SessionData } from "express-session";
-import { randomInt } from "node:crypto";
-
-const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-
-function generateRandomBase62String(length = 20): string {
-  let result = "";
-  for (let i = 0; i < length; i++) {
-    result += BASE62[randomInt(0, BASE62.length)];
-  }
-  return result;
-}
 
 function checkUsername(username: string): boolean {
   return /^\w{4,20}$/.test(username);
-}
-
-function BigIntreplacer(key: string, value: unknown): unknown {
-  return typeof value === "bigint" ? value.toString() : value;
 }
 
 async function isValidEventTypeId(eventTypeId: number, session: Session & Partial<SessionData>): Promise<void> {
@@ -136,12 +121,10 @@ function lessonDateEventAtLeastOneNull(endDate: number | null, lesson: string | 
 
 export {
   checkUsername,
-  generateRandomBase62String,
   isValidColor,
   isValidSubjectId,
   isValidTeamId,
   isValidEventTypeId,
   lessonDateEventAtLeastOneNull,
-  BigIntreplacer,
   dateChecker
 };

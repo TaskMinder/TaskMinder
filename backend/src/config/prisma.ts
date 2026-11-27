@@ -6,4 +6,13 @@ const adapter = new PrismaPg({
   connectionString: envConfig.databaseUrl
 });
 
-export const prisma = new PrismaClient({ adapter });
+// private authorship for moderation: left out of every query that does not select it
+const AUTHOR_IDS = { authorAccountId: true, lastEditorAccountId: true } as const;
+
+export const prisma = new PrismaClient({
+  adapter,
+  omit: { homework: AUTHOR_IDS, event: AUTHOR_IDS, upload: { lastEditorAccountId: true } }
+});
+
+// prisma itself or interactive transaction of it, for helpers that can run in caller's transaction 
+export type Db = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$use" | "$extends" | "$transaction">;

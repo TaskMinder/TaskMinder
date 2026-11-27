@@ -1,8 +1,8 @@
 import { RequestError } from "../@types/requestError.js";
 import { Prisma } from "../prisma/generated/prisma/client.js";
 import { Session, SessionData } from "express-session";
-import { prisma } from "../config/prisma.js";
-import { BigIntreplacer, generateRandomBase62String } from "../utils/validate.functions.js";
+import { Db, prisma } from "../config/prisma.js";
+import { BigIntreplacer, generateRandomBase62String, throwError } from "../utils/common.functions.js";
 import { CACHE_KEY_PREFIXES, invalidateCache } from "../config/redis.js";
 import logger from "../config/logger.js";
 import { redisClient } from "../config/redis.js";
@@ -31,6 +31,66 @@ import {
   upgradeTestClassTypeParams
 } from "../schemas/class.schema.js";
 import socketIO, { emitSocketToClass, SOCKET_EVENTS } from "../config/socket.js";
+import { assertSessionAccountNotBanned } from "../middleware/access.middleware.js";
+
+// session-free internals, shared by the class settings endpoints and moderation
+export async function removeLoggedOutSessions(classId: number): Promise<void> {
+  // Scan all sess: keys and delete those matching classId with no account (unregistered users)
+  let deletedCount = 0;
+  const keys = await redisStore.getClassSessionKeys(classId);
+  for (const key of keys) {
+    // Redis client typing uses deeply nested generics that cause assignment failures.
+    // Runtime calls are safe — casting to any is intentional.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = await (redisClient as any).get(key);
+    if (!raw) {
+      await redisStore.removeClassSessionKey(classId, key);
+      continue;
+    }
+    const sess = JSON.parse(raw) as SessionData;
+    if (!sess.account) {
+      await redisStore.destroyBySessionKey(key);
+      deletedCount++;
+    }
+  }
+  logger.info(`Successfully deleted ${deletedCount} unregistered user sessions for class ${classId}.`);
+}
+
+// moderation passes its decision transaction as `db`; the caller announces the new code after it is stored
+export async function rotateClassCode(classId: number, db: Db = prisma): Promise<string> {
+  //generate new class code, look if already used -> if not, return value
+  // Try until a unique code is found
+  const MAX_ATTEMPTS = 10;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const code = generateRandomBase62String();
+    const encryptedCode = encryptionManager.encrypt(code);
+    const classCodeHash = encryptionManager.hash(code);
+    const exists = await db.class.findUnique({
+      where: {
+        classCodeHash: classCodeHash
+      }
+    });
+    if (!exists) {
+      await db.class.update({
+        where: {
+          classId
+        },
+        data: {
+          classCode: encryptedCode,
+          classCodeHash: classCodeHash
+        }
+      });
+      return code;
+    }
+  }
+  // If unique code wasn't found after 10 tries, fail gracefully
+  throwError("Server Error", 500, "Could not generate unique class code", false);
+}
+
+export function announceClassCodeChange(classId: number): void {
+  emitSocketToClass(classId, SOCKET_EVENTS.CLASS_INFO);
+  logger.info(`class code was changed for class: ${classId}`);
+}
 
 const classService = {
   /*
@@ -228,6 +288,7 @@ const classService = {
       };
       throw err;
     }
+    await assertSessionAccountNotBanned(session);
     // try to find class by hash
     const classCodeHash = encryptionManager.hash(classCode);
     const targetClass = await prisma.class.findUnique({
@@ -308,7 +369,8 @@ const classService = {
         const allMembers = await tx.joinedClass.findMany({
           where: {
             classId
-          }
+          },
+          include: { Account: { select: { bannedAt: true } } }
         });
 
         // if requested account is not in this class, deny operation and delete session
@@ -331,8 +393,9 @@ const classService = {
         // admin cases
         const leavingUserIsAdmin = currentUserMemberInfo.permissionLevel === 3;
         if (leavingUserIsAdmin) {
-          // only one member left
-          if (allMembers.length === 1) {
+          // only one active member left; banned members cannot take over as admin
+          const activeMembers = allMembers.filter(member => member.Account.bannedAt === null);
+          if (activeMembers.length === 1) {
             const err: RequestError = {
               name: "Conflict",
               status: 409,
@@ -343,9 +406,9 @@ const classService = {
             throw err;
           }
 
-          // if only one admin left
+          // if only one admin left; a banned admin cannot act, so it does not count
           const adminsInClass = allMembers.filter(
-            member => member.permissionLevel === 3
+            member => member.permissionLevel === 3 && member.Account.bannedAt === null
           );
           if (adminsInClass.length === 1) {
             const err: RequestError = {
@@ -525,11 +588,12 @@ const classService = {
         });
       }
 
-      // Check if there is at least one admin left
+      // Check if there is at least one admin left; a banned admin cannot act, so it does not count
       const adminExists = await tx.joinedClass.findFirst({
         where: {
           classId,
-          permissionLevel: 3
+          permissionLevel: 3,
+          Account: { bannedAt: null }
         }
       });
 
@@ -665,11 +729,12 @@ const classService = {
           }
         });
       }
-      // Check if there is at least one admin left
+      // Check if there is at least one admin left; a banned admin cannot act, so it does not count
       const adminExists = await tx.joinedClass.findFirst({
         where: {
           classId: classId,
-          permissionLevel: 3
+          permissionLevel: 3,
+          Account: { bannedAt: null }
         }
       });
 
@@ -775,25 +840,7 @@ const classService = {
       throw err;
     }
     try {
-      // Scan all sess: keys and delete those matching classId with no account (unregistered users)
-      let deletedCount = 0;
-      const keys = await redisStore.getClassSessionKeys(classId);
-      for (const key of keys) {
-        // Redis client typing uses deeply nested generics that cause assignment failures.
-        // Runtime calls are safe — casting to any is intentional.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const raw = await (redisClient as any).get(key);
-        if (!raw) {
-          await redisStore.removeClassSessionKey(classId, key);
-          continue;
-        }
-        const sess = JSON.parse(raw) as SessionData;
-        if (!sess.account) {
-          await redisStore.destroyBySessionKey(key);
-          deletedCount++;
-        }
-      }
-      logger.info(`Successfully deleted ${deletedCount} unregistered user sessions for class ${classId}.`);
+      await removeLoggedOutSessions(classId);
     }
     catch {
       const err: RequestError = {
@@ -863,42 +910,9 @@ const classService = {
       };
       throw err;
     }
-    //generate new class code, look if already used -> if not, return value
-    // Try until a unique code is found
-    let code: string;
-    const MAX_ATTEMPTS = 10;
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      code = generateRandomBase62String();
-      const encryptedCode = encryptionManager.encrypt(code);
-      const classCodeHash = encryptionManager.hash(code);
-      const exists = await prisma.class.findUnique({
-        where: {
-          classCodeHash: classCodeHash
-        }
-      });
-      if (!exists) {
-        await prisma.class.update({
-          where: {
-            classId
-          },
-          data: {
-            classCode: encryptedCode,
-            classCodeHash: classCodeHash
-          }
-        });
-        emitSocketToClass(classId, SOCKET_EVENTS.CLASS_INFO);
-        logger.info(`class code was changed for class: ${classId}`);
-        return code;
-      }
-    }
-    // If unique code wasn't found after 10 tries, fail gracefully
-    const err: RequestError = {
-      name: "Server Error",
-      status: 500,
-      message: "Could not generate unique class code",
-      expected: false
-    };
-    throw err;
+    const code = await rotateClassCode(classId);
+    announceClassCodeChange(classId);
+    return code;
   },
   /*
   upgradeTestClass(

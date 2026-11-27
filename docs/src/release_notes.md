@@ -4,6 +4,24 @@ All changes are grouped by type and the latest version appears first.
 
 ---
 
+## \[v2.4.0] - 2026-12-??
+
+### Breaking Changes
+* chore(deploy): require new docker secrets `brevo_api_key.txt` and `moderation_password.txt` (`BREVO_API_KEY`, `MODERATION_PASSWORD`; optional in development)
+
+### Added
+* feat(report): let class members (also anonymous) report shared homework, events, uploads and accounts with a category, optional description and optional contact email
+* feat(moderation): add password-protected moderation panel
+* feat(homework/events/uploads): track the author and last editor of shared and personal items
+* docs(legal): add reports, moderation and appeal section to the terms and reports/moderation and Brevo sections to the privacy policy
+
+### Fixed
+
+### Changed
+* chore(docs): document author id omission, locks and rate limits, report tables and mail processing in cache architecture and data processing docs
+
+---
+
 ## \[v2.3.2] - 2026-10-26
 
 ### Fixed

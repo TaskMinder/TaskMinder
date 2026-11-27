@@ -22,6 +22,12 @@ export ENCRYPTION_KEY_LOOKUP
 PROXY_HOP="$(cat /run/secrets/proxy_hop)"
 export PROXY_HOP
 
+BREVO_API_KEY="$(cat /run/secrets/brevo_api_key)"
+export BREVO_API_KEY
+
+MODERATION_PASSWORD="$(cat /run/secrets/moderation_password)"
+export MODERATION_PASSWORD
+
 # ==============================================================================
 # Ensure permissions for data are returned to bun user
 # ==============================================================================

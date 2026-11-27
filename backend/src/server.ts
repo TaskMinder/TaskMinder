@@ -6,12 +6,11 @@ import { fileURLToPath } from "url";
 import cron from "node-cron";
 import express, { Request, Response } from "express";
 import { rateLimit } from "express-rate-limit";
-import session from "express-session";
 import { prisma } from "./config/prisma.js";
 import socketIO from "./config/socket.js";
 import logger from "./config/logger.js";
-import { connectRedis, redisStore } from "./config/redis.js";
-import { sessionTTLSeconds } from "./config/redis.session.js";
+import { connectRedis } from "./config/redis.js";
+import { createSessionMiddlewares } from "./config/session.js";
 import { startMetricsServer } from "./utils/metrics.server.js";
 import {
   cleanupDeletedAccounts,
@@ -19,20 +18,23 @@ import {
   cleanupOldHomework,
   cleanupTestClasses,
   cleanupStuckUploads,
+  cleanupModerationRecords,
   migrateEventAndHomeworkDates,
   migrateUploadMetadataDates
 } from "./utils/db.cleanup.js";
 import { initializeUploadWorkerServices, startUploadWorker } from "./utils/upload.process.worker.js";
 import { cleanupStaleUploadFiles } from "./utils/upload.cleanup.js";
 import { envConfig } from "./config/env.js";
-import { BigIntreplacer } from "./utils/validate.functions.js";
+import { BigIntreplacer } from "./utils/common.functions.js";
 import { prefetchSubstitutionDataForAllClasses } from "./services/substitution.service.js";
+import { sendOpenReportDigest } from "./services/report.service.js";
+import { processMailQueue } from "./utils/mail.queue.js";
 import checkAccess from "./middleware/access.middleware.js";
 import { ErrorHandler } from "./middleware/error.middleware.js";
 import { loggerMiddleware } from "./middleware/logger.middleware.js";
 import { metricsMiddleware } from "./middleware/metrics.middleware.js";
 import { CSPMiddleware } from "./middleware/CSP.middleware.js";
-import { csrfProtection, ensureCsrfSessionToken } from "./middleware/csrfProtection.middleware.js";
+import { csrfProtection, sendCsrfToken } from "./middleware/csrfProtection.middleware.js";
 import apiVersionMiddleware, { MAX_VERSION } from "./middleware/version.middleware.js";
 import { authLimiter } from "./routes/account.route.js";
 import accountService from "./services/account.service.js";
@@ -46,11 +48,12 @@ import teams from "./routes/team.route.js";
 import classes from "./routes/class.route.js";
 import uploads from "./routes/upload.route.js";
 import statistics from "./routes/statistics.route.js";
+import reports from "./routes/report.route.js";
+import moderation from "./routes/moderation.route.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const sessionSecret = envConfig.sessionSecret;
 const proxyHop = envConfig.proxyHop;
 
 const app = express();
@@ -81,20 +84,7 @@ app.use(express.static("frontend/dist"));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-const sessionMiddleware = session({
-  store: redisStore,
-  proxy: envConfig.nodeEnv !== "DEVELOPMENT",
-  secret: sessionSecret,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    sameSite: "lax",
-    maxAge: sessionTTLSeconds * 1000, // 30 days
-    httpOnly: true,
-    secure: envConfig.nodeEnv === "PRODUCTION"
-  },
-  name: "UserLogin"
-});
+const { sessionMiddleware, moderationSessionMiddleware } = createSessionMiddlewares();
 
 app.get("/health", (req, res) => {
   res.status(200).json({ message: "service operational" });
@@ -102,7 +92,8 @@ app.get("/health", (req, res) => {
 
 socketIO.initialize(server, sessionMiddleware);
 
-app.use(sessionMiddleware);
+const MODERATION_PATH = /^\/moderation(\/|$)/i;
+app.use((req, res, next) => (MODERATION_PATH.test(req.path) ? moderationSessionMiddleware : sessionMiddleware)(req, res, next));
 
 app.get("/bootstrap", authLimiter, async (req, res, next) => {
   try {
@@ -115,25 +106,14 @@ app.get("/bootstrap", authLimiter, async (req, res, next) => {
     const version = MAX_VERSION;
     
     res.set("Cache-Control", "no-store");
-    res.status(200).json({ maintenance: false, classJoined: auth.classJoined, version, cacheEnabled });
+    res.status(200).json({ maintenance: false, classJoined: auth.classJoined, version, cacheEnabled, ban: auth.ban ?? null });
   }
   catch (error) {
     next(error);
   }
 });
 
-app.get("/csrf-token", csrfTokenLimiter, (req, res) => {
-  const secFetchSite = req.header("sec-fetch-site");
-  if (secFetchSite && !["same-origin", "same-site", "none"].includes(secFetchSite)) {
-    return res.status(403).json({ message: "Forbidden" });
-  }
-  const csrfToken = ensureCsrfSessionToken(req);
-  res
-    .set("Cache-Control", "no-store, no-cache, must-revalidate, private")
-    .set("Pragma", "no-cache")  // HTTP/1.0 compat
-    .set("Surrogate-Control", "no-store") // CDN layer
-    .json({ csrfToken });
-});
+app.get("/csrf-token", csrfTokenLimiter, sendCsrfToken);
 app.use(csrfProtection);
 app.use(metricsMiddleware);
 app.use(loggerMiddleware);
@@ -170,6 +150,13 @@ app.get("/about", (req, res) => {
 
 app.use("/stats", statistics);
 
+// the moderation page loads its data from /moderation/api and shows its login form on 401
+app.get("/moderation", (req, res) => {
+  res.set({ "Cache-Control": "no-store", "X-Robots-Tag": "noindex" });
+  res.sendFile(path.join(pagesPath, "moderation", "moderation.html"));
+});
+app.use("/moderation/api", moderation);
+
 // Apply API version check only to API routes
 app.use("/api", apiVersionMiddleware);
 
@@ -182,6 +169,7 @@ app.use("/api/subjects", subjects);
 app.use("/api/lessons", lessons);
 app.use("/api/classes", classes);
 app.use("/api/uploads", uploads);
+app.use("/api/reports", reports);
 
 //
 // Protected routes: Redirect to /join if not logged in
@@ -233,6 +221,8 @@ cron.schedule("0 0 * * *", () => {
   cleanupOldEvents();
   cleanupDeletedAccounts();
   cleanupStaleUploadFiles();
+  cleanupModerationRecords();
+  sendOpenReportDigest();
 });
 
 // Run demo class script every week (once) - only for demo class
@@ -255,6 +245,11 @@ cron.schedule("*/1 6-8 * * 1-5", () => {
     logger.error(`Scheduled substitution prefetch failed: ${err}`);
   });
 });
+
+// Send due mails of the mail queue (reporter receipts and decisions, also retries) every minute
+setInterval(() => {
+  void processMailQueue();
+}, 60 * 1000);
 
 // Run stuck upload cleanup every 10 minutes
 setInterval(() => {

@@ -1,7 +1,8 @@
 import { CACHE_KEY_PREFIXES, generateCacheKey, redisClient } from "../config/redis.js";
 import { prisma } from "../config/prisma.js";
 import logger from "../config/logger.js";
-import { BigIntreplacer, isValidTeamId, isValidSubjectId, dateChecker } from "../utils/validate.functions.js";
+import { isValidTeamId, isValidSubjectId, dateChecker } from "../utils/validate.functions.js";
+import { BigIntreplacer } from "../utils/common.functions.js";
 import { updateCacheData, invalidateCache } from "../config/redis.js";
 import { Session, SessionData } from "express-session";
 import { setLessonDataTypeBody } from "../schemas/lesson.schema.js";
