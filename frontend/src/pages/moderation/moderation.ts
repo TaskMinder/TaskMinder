@@ -65,14 +65,13 @@ type ReportDetails = {
 };
 
 const BAN = {
-  hint: "Sperrt das Konto für ganz TaskMinder. Ein gesperrter Admin verliert die Rolle; ohne anderen aktiven Admin wird das längste Mitglied Admin.",
+  hint: "Sperrt das Konto für ganz TaskMinder und entfernt es aus seiner Klasse. Hat die Klasse dann keinen Admin, wird das längste Mitglied Admin.",
   reason: "Pflicht: Das gesperrte Konto und Melder mit E-Mail-Adresse lesen sie.",
   rotate: "Sonst kann das gesperrte Konto sich abmelden und anonym weitermachen."
 };
 
-// label: form and button, done: decision already made, hint: what it does, reason: who reads the reason
-// (they also get ground and how to appeal), confirm: asked before decisions the panel cannot undo,
-// rotate: why one would change the class code as well (only actions that can)
+// done: label of a made decision, reason: who reads the reason, confirm: before decisions the panel cannot undo,
+// rotate: why to change the class code as well
 const ACTIONS: Record<ModerationAction, {
   label: string; done: string; hint: string; reason: string; button: string; confirm?: string; rotate?: string;
 }> = {
@@ -404,7 +403,6 @@ function fillFacts(listId: string, facts: [string, string][]): void {
   ]));
 }
 
-// last editor is stored as is: the author's id when the author edited last, null after an anonymous edit
 function editorText(report: ReportDetails["report"], editor: AccountInfo): string {
   const editorIsAuthor = report.editorAccountId !== null && report.editorAccountId === report.targetAccountId;
   return editorIsAuthor ? "der Autor" : accountText(report.editorAccountId, editor);
@@ -428,7 +426,7 @@ function reportFacts(data: ReportDetails): [string, string][] {
   ];
 }
 
-// a decision acts on the content as it is now; it is shown in full only when it differs from the snapshot
+// current content is shown only when it differs from the snapshot
 function renderCurrent(data: ReportDetails): void {
   const { report, current, changedSinceReport } = data;
   const status = byId("report-current-status");
@@ -499,7 +497,7 @@ function renderDecisionForm(data: ReportDetails): void {
     return [input, label];
   }));
 
-  // one ban hits one account, so the operator says which; an account is banned only once, a deleted one never
+  // only accounts not banned or deleted yet
   const banTarget = byId<HTMLSelectElement>("decision-ban-target");
   banTarget.replaceChildren();
   if (report.targetAccountId !== null && isBannable(author)) {

@@ -17,7 +17,7 @@ export const getUploadMetadata = async (
   }
 };
 
-// shared by app and moderation panel, "cacheControl" overrides file's own header
+// shared by app and moderation panel
 export function pipeUploadFile(
   { stream, headers }: GetUploadFileResult,
   res: Response,

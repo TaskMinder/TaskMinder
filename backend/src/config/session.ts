@@ -7,7 +7,6 @@ import { RedisStore, sessionTTLSeconds } from "./redis.session.js";
 export const MODERATOR_SESSION_MS = 3 * 60 * 60 * 1000; // 3 hours
 export const MODERATION_COOKIE = { name: "TaskMinderModeration", path: "/moderation" } as const;
 
-// moderation panel's sessions, as long as panel login
 const moderationRedisStore = new RedisStore({
   client: redisClient,
   prefix: "mod_sess:",
@@ -33,8 +32,7 @@ function createSession(
 export function createSessionMiddlewares(): { sessionMiddleware: RequestHandler; moderationSessionMiddleware: RequestHandler } {
   return {
     sessionMiddleware: createSession(redisStore, "UserLogin", { sameSite: "lax", maxAge: sessionTTLSeconds * 1000 }),
-    // moderation panel has own short session and cookie
-    // stolen app cookie does not reach panel
+    // own short session and cookie, so the 30-day app cookie never carries moderator rights
     moderationSessionMiddleware: createSession(moderationRedisStore, MODERATION_COOKIE.name, {
       sameSite: "strict",
       maxAge: MODERATOR_SESSION_MS,
@@ -43,7 +41,7 @@ export function createSessionMiddlewares(): { sessionMiddleware: RequestHandler;
   };
 }
 
-// new session id on login and logout (-> session id known before cannot be used afterwards)
+// new session id on login and logout
 export function regenerateSession(
   req: Request,
   preservedData: { classId?: string; csrfToken?: string } = {}

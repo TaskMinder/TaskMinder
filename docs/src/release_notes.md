@@ -18,7 +18,7 @@ All changes are grouped by type and the latest version appears first.
 ### Fixed
 
 ### Changed
-* chore(docs): document author id omission, locks and rate limits, report tables and mail processing in cache architecture and data processing docs
+* chore(docs): document author id omission, rate limits, report tables and mail processing in cache architecture and data processing docs
 
 ---
 

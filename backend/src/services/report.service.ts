@@ -12,11 +12,9 @@ import { reporterReceiptMail } from "../utils/moderation.statements.js";
 import { createReportTypeBody } from "../schemas/report.schema.js";
 
 const DAY_SECONDS = 24 * 60 * 60;
-// reporters can type in any address, so one address gets mails for only a few reports a day (no mail bombing of others);
-// all other mail volume is bounded by the daily budget in sendMail, reporter mails past it wait in mail queue
+const HOUR_MS = 60 * 60 * 1000;
+// reporters can type in any address: few mails per address and day, so no mail bombing of others
 const REPORTS_PER_CONTACT_PER_DAY = 3;
-// past it operator is not mailed per report any more, reports are still counted in daily digest
-const OPERATOR_MAILS_PER_DAY = 50;
 const PANEL_URL = `${APP_URL}/moderation`;
 
 // ids app shows as "all" or "other" instead of team or subject
@@ -25,15 +23,15 @@ const OTHER_SUBJECT = -1;
 
 type ReportTarget = {
   targetAccountId: number | null;
-  // last editor as stored: same id as author when author edited last, null after anonymous edit
+  // null after anonymous edit
   editorAccountId: number | null;
-  // what class sees, with names instead of ids, as JSON (bigints as strings); never file bytes
+  // what class sees, names instead of ids; never file bytes
   content: Prisma.InputJsonObject;
-  // personal (account-scoped) homework or event: only its owner sees it
+  // personal homework or event, only its owner sees it
   personal: boolean;
 };
 
-// identifies reporter for dedupe; anonymous members by their session
+// for dedupe; anonymous members by their session
 function reporterKeyOf(session: Session & Partial<SessionData>): string {
   return session.account
     ? `account:${session.account.accountId}`
@@ -140,7 +138,7 @@ async function loadUpload(uploadId: number, classId: number): Promise<ReportTarg
   if (!upload) {
     return null;
   }
-  // uploader is whoever uploaded current files; last editor may only have changed name or description
+  // uploader of the current files; last editor may only have changed name or description
   return {
     targetAccountId: upload.accountId,
     editorAccountId: upload.lastEditorAccountId,
@@ -169,7 +167,7 @@ async function loadAccount(accountId: number, classId: number): Promise<ReportTa
   return { targetAccountId: accountId, editorAccountId: null, personal: false, content: { username: member.Account.username } };
 }
 
-// target of class with its author and content, for snapshot and for panel's view of it (now)
+// for the snapshot and the panel's current view
 export async function loadReportTarget(targetType: ReportTargetType, targetId: number, classId: number): Promise<ReportTarget | null> {
   switch (targetType) {
   case "homework":
@@ -190,41 +188,30 @@ async function underLimit(key: string, limit: number, windowSeconds: number): Pr
   return Number(count) <= limit;
 }
 
-// operator mail holds no user content, moderation panel shows it
-async function notifyOperator(reportId: number, report: createReportTypeBody, createdAt: number): Promise<void> {
-  const time = new Date(createdAt).toISOString();
-  if (await underLimit("report_notify:operator", OPERATOR_MAILS_PER_DAY, DAY_SECONDS)) {
-    await sendMail({
-      to: SUPPORT_EMAIL,
-      subject: `TaskMinder report #${reportId}`,
-      text: [
-        `Report: #${reportId}`,
-        `Category: ${report.category}`,
-        `Target type: ${report.targetType}`,
-        `Time: ${time}`,
-        `Panel: ${PANEL_URL}`
-      ].join("\n")
-    });
-  }
-  else {
-    logger.warn(`Operator mail for report ${reportId} skipped, daily cap reached. It is counted in the daily digest`);
-  }
-}
-
-// reports whose mail got lost or capped would sit unseen otherwise
+// hourly operator mail, only when reports came in during the last full hour (at most 24 a day);
+// no user content in the mail, the panel shows it
 export async function sendOpenReportDigest(): Promise<void> {
   try {
-    const openReports = await prisma.report.count({ where: { resolvedAt: null } });
-    if (openReports > 0) {
-      await sendMail({ to: SUPPORT_EMAIL, subject: `TaskMinder: ${openReports} open report(s)`, text: `Panel: ${PANEL_URL}` });
+    const hourEnd = Math.floor(Date.now() / HOUR_MS) * HOUR_MS;
+    const newReports = await prisma.report.count({
+      where: { resolvedAt: null, createdAt: { gte: hourEnd - HOUR_MS, lt: hourEnd } }
+    });
+    if (newReports === 0) {
+      return;
     }
+    const openReports = await prisma.report.count({ where: { resolvedAt: null } });
+    await sendMail({
+      to: SUPPORT_EMAIL,
+      subject: `TaskMinder: ${newReports} new report(s), ${openReports} open`,
+      text: `Panel: ${PANEL_URL}`
+    });
   }
   catch (error) {
     logger.error(`Failed to send the open report digest: ${error}`);
   }
 }
 
-// false when reporter already has open report on this target (unique index on open reports, see migration)
+// false when reporter already has an open report on this target (partial unique index, see migration)
 async function fileReport(
   report: createReportTypeBody,
   target: ReportTarget,
@@ -232,15 +219,15 @@ async function fileReport(
 ): Promise<boolean> {
   const { targetType, targetId, category, description, contactEmail } = report;
   const classId = parseInt(session.classId!, 10);
-  // over cap report is still filed, just without contact
-  const reporterContact = contactEmail !== undefined
-    && await underLimit(`report_mail:${encryptionManager.hash(contactEmail.toLowerCase())}`, REPORTS_PER_CONTACT_PER_DAY, DAY_SECONDS)
-    ? encryptionManager.encrypt(contactEmail)
-    : null;
+  const contactKey = contactEmail === undefined ? null : `report_mail:${encryptionManager.hash(contactEmail.toLowerCase())}`;
+  // over cap the reporter gets no receipt: refused, so it can be sent without email
+  if (contactKey !== null && !await underLimit(contactKey, REPORTS_PER_CONTACT_PER_DAY, DAY_SECONDS)) {
+    throwError("Too Many Requests", 429, "Too many reports with this email address today. Send it without email address or try again tomorrow");
+  }
+  const reporterContact = contactEmail === undefined ? null : encryptionManager.encrypt(contactEmail);
   const createdAt = Date.now();
-  let reportId: number;
   try {
-    reportId = await prisma.$transaction(async tx => {
+    await prisma.$transaction(async tx => {
       const newReport = await tx.report.create({
         data: {
           classId,
@@ -260,19 +247,19 @@ async function fileReport(
       if (reporterContact !== null) {
         await queueMails(tx, [{ recipient: reporterContact, ...reporterReceiptMail(newReport.reportId, category, createdAt) }]);
       }
-      return newReport.reportId;
     });
   }
   catch (error) {
+    // only filed reports use up the address's slots
+    if (contactKey !== null) {
+      await redisClient.decr(contactKey);
+    }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       return false;
     }
     throw error;
   }
-  // independent of each other, so failed operator mail will not let receipt fail (DSA Art. 16(4));
-  // receipt was queued with report and is retried, operator mail is best effort (daily digest covers it)
-  void notifyOperator(reportId, report, createdAt)
-    .catch(error => logger.error(`Failed to notify the operator about report ${reportId}: ${error}`));
+  // receipt is queued with the report and retried; operator hears of it in the hourly digest
   void processMailQueue();
   return true;
 }
@@ -280,9 +267,15 @@ async function fileReport(
 const reportService = {
   async createReport(reqBody: createReportTypeBody, session: Session & Partial<SessionData>) {
     const target = await loadReportTarget(reqBody.targetType, reqBody.targetId, parseInt(session.classId!, 10));
-    // personal items are only seen by their owner, so there is nothing to report
+    // only its owner sees a personal item
     if (!target || target.personal) {
       throwError("Not Found", 404, "Report target not found in this class");
+    }
+    // own account, or own item no one else edited since
+    const accountId = session.account?.accountId;
+    if (accountId !== undefined && target.targetAccountId === accountId
+      && (reqBody.targetType === "account" || target.editorAccountId === accountId)) {
+      throwError("Bad Request", 400, "You cannot report your own account or content");
     }
     return await fileReport(reqBody, target, session);
   }

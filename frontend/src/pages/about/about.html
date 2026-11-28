@@ -214,7 +214,8 @@
           <p>
             Wenn ein Inhalt gemeldet wird, speichern wir die Meldung: was gemeldet wurde, eine Kopie des Inhalts zum Zeitpunkt der Meldung (bei
             Dateien nur Name und Metadaten, nicht die Datei), wer den Inhalt erstellt und zuletzt bearbeitet hat, den gewählten Grund, die
-            Beschreibung und ob die Meldung von einem Account oder anonym kam. Eine freiwillig angegebene E-Mail-Adresse speichern wir verschlüsselt
+            Beschreibung sowie bis zur Entscheidung, von welchem Account die Meldung kam (bei Meldungen ohne Account ein Hashwert der Sitzung), damit
+            niemand denselben Inhalt mehrfach meldet. Eine freiwillig angegebene E-Mail-Adresse speichern wir verschlüsselt
             und löschen sie, sobald wir Ihnen unsere Entscheidung geschickt haben. Bei einer Sperre speichern wir Zeitpunkt, Grund und Begründung am Account.
           </p>
 
@@ -392,7 +393,7 @@
 
           <p>
             Liegt ein Verstoß vor, können wir den Inhalt löschen, einen Account sperren oder den Code der Klasse ändern. Eine Sperre gilt für ganz
-            TaskMinder, bis wir sie aufheben. Ein neuer Klassencode meldet alle Mitglieder ohne Account aus der Klasse ab. Liegt kein Verstoß vor,
+            TaskMinder, bis wir sie aufheben, und entfernt den Account aus seiner Klasse. Ein neuer Klassencode meldet alle Mitglieder ohne Account aus der Klasse ab. Liegt kein Verstoß vor,
             bleibt alles unverändert.
           </p>
 

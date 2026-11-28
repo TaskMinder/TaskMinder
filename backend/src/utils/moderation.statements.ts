@@ -1,17 +1,12 @@
 import { APP_URL, SUPPORT_EMAIL } from "../config/mail.js";
 import type { DecisionGround, ModerationAction, ReportCategory } from "../prisma/generated/prisma/enums.js";
 
-// tell people about moderation decision:
-// 1. decision mail to reporters (DSA Art. 16(5))
-// 2. statement of reasons for bans (DSA Art. 17); removed content has no notice for its author or editor
-// 3. every text says what was decided, on which ground, that person decided after report,
-// how to contest it with us and that court stays open (DSA Art. 17(3)(f)). no deadline: the six-month
-// complaint system of Art. 20 does not apply to micro and small providers (Art. 19(1)).
-// (panel texts are used in frontend/src/pages/moderation)
+// decision mails to reporters (DSA Art. 16(5)) and statement of reasons for bans (Art. 17): decision, ground,
+// made by a person after a report, how to appeal, court stays open (Art. 17(3)(f)).
+// no appeal deadline: Art. 20 does not apply to micro and small providers (Art. 19(1))
 
 const TERMS_URL = `${APP_URL}/about#terms-of-use`;
 
-// for the reporter
 const DECISION_LABELS: Record<ModerationAction, string> = {
   dismiss: "Wir sehen keinen Verstoß",
   remove: "Wir haben die relevanten Inhalte gelöscht",
@@ -20,7 +15,7 @@ const DECISION_LABELS: Record<ModerationAction, string> = {
   rotate_class_code: "Wir haben den Klassencode geändert"
 };
 
-// remove actions whose content its author had deleted before decision
+// content was deleted before the decision
 const ALREADY_DELETED_LABELS: Partial<Record<ModerationAction, string>> = {
   remove: "Die relevanten Inhalte waren bereits gelöscht",
   remove_and_ban: "Die relevanten Inhalte waren bereits gelöscht und wir haben das zugehörige Konto gesperrt"
@@ -52,7 +47,7 @@ function groundAndReason(ground: DecisionGround | null, reason: string | null): 
   ].filter(line => line !== "");
 }
 
-// how to appeal; reference what person names in appeal so we find decision
+// reference: what to name in the appeal
 function appealParagraph(reference: string, replyable: boolean): string {
   const channel = replyable ? `antworte auf diese E-Mail oder schreib an ${SUPPORT_EMAIL}` : `schreib an ${SUPPORT_EMAIL}`;
   return [
@@ -62,7 +57,7 @@ function appealParagraph(reference: string, replyable: boolean): string {
   ].join(" ");
 }
 
-// DSA Art. 16(5): reporter hears decision and how appeal
+// DSA Art. 16(5)
 export function reporterDecisionMail(
   reportId: number,
   action: ModerationAction,
@@ -82,7 +77,7 @@ export function reporterDecisionMail(
   };
 }
 
-// DSA Art. 16(4): confirms receipt of report
+// DSA Art. 16(4)
 export function reporterReceiptMail(reportId: number, category: ReportCategory, createdAt: number): { subject: string; text: string } {
   return {
     subject: `TaskMinder: Meldung #${reportId} erhalten`,
@@ -94,7 +89,7 @@ export function reporterReceiptMail(reportId: number, category: ReportCategory, 
   };
 }
 
-// DSA Art. 17: statement of reasons for banned account, shown on every request it makes
+// DSA Art. 17, shown on every request of banned account
 export function banStatement(account: { bannedAt: number; banGround: DecisionGround | null; banReason: string | null }): string {
   return [
     `Dein Konto wurde am ${formatDate(account.bannedAt)} gesperrt. Die Sperre gilt für ganz TaskMinder, bis wir sie aufheben.`,

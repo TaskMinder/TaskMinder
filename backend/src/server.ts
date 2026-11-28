@@ -222,7 +222,11 @@ cron.schedule("0 0 * * *", () => {
   cleanupDeletedAccounts();
   cleanupStaleUploadFiles();
   cleanupModerationRecords();
-  sendOpenReportDigest();
+});
+
+// Mail the operator every hour about reports of the last hour
+cron.schedule("0 * * * *", () => {
+  void sendOpenReportDigest();
 });
 
 // Run demo class script every week (once) - only for demo class
@@ -246,7 +250,7 @@ cron.schedule("*/1 6-8 * * 1-5", () => {
   });
 });
 
-// Send due mails of the mail queue (reporter receipts and decisions, also retries) every minute
+// Send due mails of the mail queue every minute
 setInterval(() => {
   void processMailQueue();
 }, 60 * 1000);

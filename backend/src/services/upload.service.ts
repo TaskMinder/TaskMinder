@@ -71,9 +71,7 @@ type RemovableUpload = Pick<
   "uploadId" | "classId" | "status" | "reservedBytes" | "Files"
 >;
 
-// session-free removal (shared by deleteUpload and moderation), deletes record and releases storage;
-// false when upload was deleted in parallel since caller read it (delete itself is existence check,
-// so storage is released once and caller does not announce removal twice)
+// shared by deleteUpload and moderation; false when deleted in parallel (storage released once)
 export async function deleteUploadRecord(db: Db, uploadData: RemovableUpload): Promise<boolean> {
   const { uploadId, classId } = uploadData;
 
@@ -119,8 +117,7 @@ export async function announceUploadRemoval(uploadData: RemovableUpload): Promis
   logger.info(`upload deleted for class: ${classId}`);
 }
 
-// session-free file access, shared by getUploadFile and the moderation panel;
-// the file must belong to the class (and to the upload, when given)
+// shared by getUploadFile and moderation panel; file must belong to class (and upload, when given)
 export async function openUploadFile(
   fileId: number,
   scope: { classId: number; uploadId?: number },
@@ -518,7 +515,7 @@ const uploadService = {
       }
     }
 
-    // update non-file related data later; an anonymous edit leaves no editor
+    // update non-file related data later
     await prisma.upload.update({
       where: { uploadId: uploadId, classId },
       data: { uploadName, uploadDescription, uploadType, teamId, lastEditorAccountId: accountId }
@@ -554,7 +551,7 @@ const uploadService = {
 
     await isValidTeamId(uploadData.teamId, session);
 
-    // deleted in parallel (double click): same answer as when it was gone before
+    // deleted in parallel (double click)
     if (!await prisma.$transaction(tx => deleteUploadRecord(tx, uploadData))) {
       throwError("Not Found", 404, "Upload not found.");
     }

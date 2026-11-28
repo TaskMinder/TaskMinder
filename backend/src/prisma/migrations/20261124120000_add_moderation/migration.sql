@@ -35,7 +35,7 @@ CREATE TABLE "report" (
     "targetId" INTEGER NOT NULL,
     "targetAccountId" INTEGER,
     "editorAccountId" INTEGER,
-    "reporterKey" TEXT NOT NULL,
+    "reporterKey" TEXT,
     "reporterContact" TEXT,
     "category" "ReportCategory" NOT NULL,
     "description" TEXT,

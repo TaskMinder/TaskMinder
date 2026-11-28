@@ -34,6 +34,14 @@ import socketIO, { emitSocketToClass, SOCKET_EVENTS } from "../config/socket.js"
 import { assertSessionAccountNotBanned } from "../middleware/access.middleware.js";
 
 // session-free internals, shared by the class settings endpoints and moderation
+
+// class data of a member besides its membership: joined teams, homework checks, uploader of its uploads
+export async function removeMemberData(db: Db, accountId: number, classId: number): Promise<void> {
+  await db.joinedTeams.deleteMany({ where: { accountId, Team: { is: { classId } } } });
+  await db.homeworkCheck.deleteMany({ where: { accountId, Homework: { is: { classId } } } });
+  await db.upload.updateMany({ where: { accountId, classId }, data: { accountId: null } });
+}
+
 export async function removeLoggedOutSessions(classId: number): Promise<void> {
   // Scan all sess: keys and delete those matching classId with no account (unregistered users)
   let deletedCount = 0;
@@ -56,7 +64,7 @@ export async function removeLoggedOutSessions(classId: number): Promise<void> {
   logger.info(`Successfully deleted ${deletedCount} unregistered user sessions for class ${classId}.`);
 }
 
-// moderation passes its decision transaction as `db`; the caller announces the new code after it is stored
+// moderation passes its transaction as `db`; caller announces the code after commit
 export async function rotateClassCode(classId: number, db: Db = prisma): Promise<string> {
   //generate new class code, look if already used -> if not, return value
   // Try until a unique code is found
@@ -369,8 +377,7 @@ const classService = {
         const allMembers = await tx.joinedClass.findMany({
           where: {
             classId
-          },
-          include: { Account: { select: { bannedAt: true } } }
+          }
         });
 
         // if requested account is not in this class, deny operation and delete session
@@ -393,9 +400,8 @@ const classService = {
         // admin cases
         const leavingUserIsAdmin = currentUserMemberInfo.permissionLevel === 3;
         if (leavingUserIsAdmin) {
-          // only one active member left; banned members cannot take over as admin
-          const activeMembers = allMembers.filter(member => member.Account.bannedAt === null);
-          if (activeMembers.length === 1) {
+          // only one member left
+          if (allMembers.length === 1) {
             const err: RequestError = {
               name: "Conflict",
               status: 409,
@@ -406,9 +412,9 @@ const classService = {
             throw err;
           }
 
-          // if only one admin left; a banned admin cannot act, so it does not count
+          // if only one admin left
           const adminsInClass = allMembers.filter(
-            member => member.permissionLevel === 3 && member.Account.bannedAt === null
+            member => member.permissionLevel === 3
           );
           if (adminsInClass.length === 1) {
             const err: RequestError = {
@@ -442,35 +448,7 @@ const classService = {
         // delete cache of upload metadata as author may not be in class anymore
         await invalidateCache(CACHE_KEY_PREFIXES.UPLOADMETADATA, classId.toString());
         // delete joinedTeams, homeworkCheck and set relevant upload author to null
-        await tx.joinedTeams.deleteMany({
-          where: {
-            accountId: session.account!.accountId,
-            Team: {
-              is: {
-                classId
-              }
-            }
-          }
-        });
-        await tx.homeworkCheck.deleteMany({
-          where: {
-            accountId: session.account!.accountId,
-            Homework: {
-              is: {
-                classId
-              }
-            }
-          }
-        });
-        await tx.upload.updateMany({
-          where: {
-            accountId: session.account!.accountId,
-            classId
-          },
-          data: {
-            accountId: null
-          }
-        });
+        await removeMemberData(tx, session.account!.accountId, classId);
         logger.info(`User ${session.account} left class: ${classId}`);
         emitSocketToClass(classId, SOCKET_EVENTS.UPLOADS);
       });
@@ -588,12 +566,11 @@ const classService = {
         });
       }
 
-      // Check if there is at least one admin left; a banned admin cannot act, so it does not count
+      // Check if there is at least one admin left
       const adminExists = await tx.joinedClass.findFirst({
         where: {
           classId,
-          permissionLevel: 3,
-          Account: { bannedAt: null }
+          permissionLevel: 3
         }
       });
 
@@ -699,42 +676,13 @@ const classService = {
         }
         // delete cache of upload metadata to avoid null authors
         await invalidateCache(CACHE_KEY_PREFIXES.UPLOADMETADATA, classId.toString());
-        await tx.joinedTeams.deleteMany({
-          where: {
-            accountId: classMember.accountId,
-            Team: {
-              is: {
-                classId
-              }
-            }
-          }
-        });
-        await tx.homeworkCheck.deleteMany({
-          where: {
-            accountId: classMember.accountId,
-            Homework: {
-              is: {
-                classId
-              }
-            }
-          }
-        });
-        await tx.upload.updateMany({
-          where: {
-            accountId: classMember.accountId,
-            classId
-          },
-          data: {
-            accountId: null
-          }
-        });
+        await removeMemberData(tx, classMember.accountId, classId);
       }
-      // Check if there is at least one admin left; a banned admin cannot act, so it does not count
+      // Check if there is at least one admin left
       const adminExists = await tx.joinedClass.findFirst({
         where: {
           classId: classId,
-          permissionLevel: 3,
-          Account: { bannedAt: null }
+          permissionLevel: 3
         }
       });
 
@@ -767,11 +715,6 @@ const classService = {
 
       // Clear class auth cache
       await redisClient.del(`auth_class:${classId}`);
-
-      // Clear auth_user caches for kicked accounts
-      for (const accountId of kickedAccountIds) {
-        await redisClient.del(`auth_user:${accountId}`);
-      }
     }
     catch (err) {
       logger.error(`Error destroying kicked member sessions for class ${classId}: ${err}`);

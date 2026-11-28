@@ -13,23 +13,21 @@ import { validate } from "../middleware/validation.middleware.js";
 import { sendCsrfToken } from "../middleware/csrfProtection.middleware.js";
 
 // moderation rate limiters
-const moderationLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30 });
+const moderationLimiter = rateLimit({ windowMs: 60 * 1000, limit: 100 });
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10 });
 
 const router = express.Router();
 
-// at /moderation/api (outside /api): not versioned with app,
-// and service worker caches /api responses (NEVER for moderation data)
+// outside /api: not versioned with the app, and the service worker caches /api
 router.use(moderationLimiter, (req, res, next) => {
   res.set({ "Cache-Control": "no-store", "X-Robots-Tag": "noindex" });
   next();
 });
 
-// panel session is separate from app session -> own CSRF token
 router.get("/csrf-token", sendCsrfToken);
 router.post("/login", loginLimiter, validate(loginSchema), moderationController.login);
 
-router.use(checkAccess(["MODERATOR"])); // everything below needs panel login
+router.use(checkAccess(["MODERATOR"]));
 router.post("/logout", moderationController.logout);
 router.get("/overview", moderationController.getOverview);
 router.get("/reports/:id", validate(getReportSchema), moderationController.getReport);

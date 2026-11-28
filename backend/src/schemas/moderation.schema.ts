@@ -26,13 +26,12 @@ export const getReportFileSchema = z.object({
   body: z.unknown()
 });
 
-// every action but dismiss restricts something, so it needs ground (DSA Art. 17(3)(d), (e)) and reason
+// restricting actions need ground and reason (DSA Art. 17(3)(d), (e))
 const restrictionFields = {
   ground: z.enum(DecisionGround),
   reason: z.string().trim().min(1).max(1000)
 };
 
-// also lock out anonymous members (and banned account that logs out) by new class code
 const rotateClassCodeField = { rotateClassCode: z.boolean().optional() };
 
 export const resolveReportSchema = z.object({
@@ -47,7 +46,6 @@ export const resolveReportSchema = z.object({
     z.strictObject({
       action: z.literal(["ban", "remove_and_ban"]),
       ...restrictionFields,
-      // which account ban hits
       banTarget: z.enum(["author", "editor"]),
       ...rotateClassCodeField
     })

@@ -1,7 +1,6 @@
 import z from "zod";
 import { ReportCategory, ReportTargetType } from "../prisma/generated/prisma/enums.js";
 
-// values come from database enums
 export const createReportSchema = z.object({
   params: z.object({}),
   query: z.object({}),

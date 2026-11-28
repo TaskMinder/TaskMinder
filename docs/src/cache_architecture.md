@@ -5,12 +5,12 @@
 TaskMinder uses one Redis instance (`redisClient`) for:
 
 1. **Data cache**: read-through caches of database query results, namespaced under `cache:`.
-2. **Auth gates**: short-lived flags that throttle account/class existence checks.
+2. **Auth gate**: short-lived flag that throttles class existence checks.
 3. **Sessions**: the `express-session` store plus a per-class reverse index.
 4. **Job queue**: a list that hands file-processing jobs to a worker.
-5. **Locks and rate limits**: used by the reporting and moderation flow.
+5. **Rate limits**: used by the reporting flow.
 
-The connection, key-prefix constants, lock helpers (`acquireLock`, `releaseLock`) and queue helpers live in `backend/src/config/redis.ts`; the session middlewares and the moderation session store in `backend/src/config/session.ts`.
+The connection, key-prefix constants and queue helpers live in `backend/src/config/redis.ts`; the session middlewares and the moderation session store in `backend/src/config/session.ts`.
 
 ---
 
@@ -29,15 +29,12 @@ cache:<baseKey>:<classId>:acc:<accountId>  // personal (per-account) partition
 
 | Namespace          | Pattern                                | Built by                                |
 | :----------------- | :------------------------------------- | :-------------------------------------- |
-| Auth gate (user)   | `auth_user:<accountId>`                | access middleware                       |
 | Auth gate (class)  | `auth_class:<classId>`                 | access middleware                       |
 | Session payload    | `sess:<sid>`                           | `RedisStore` (`prefix` = `sess:`)       |
 | Moderation session | `mod_sess:<sid>`                       | `RedisStore` (`prefix` = `mod_sess:`)   |
 | Class session set  | `class_sessions:<classId>`             | `RedisStore`                            |
 | Job queue          | `file_processing_queue`                | `QUEUE_KEYS`                            |
-| Lock               | `mail_queue_lock`                      | `acquireLock` in the mail queue         |
-| Rate-limit counter | `report_notify:operator`, `report_mail:…` | `report.service.ts`                  |
-| Mail budget        | `mail_budget:<YYYY-MM-DD>`             | `sendMail` in `config/mail.ts`          |
+| Rate-limit counter | `report_mail:…`                        | `report.service.ts`                     |
 
 ---
 
@@ -86,16 +83,15 @@ Data comes from the external DSB Mobile service and relies on TTL, stale-serve a
 
 ---
 
-## 2. Auth Gates
+## 2. Auth Gate
 
-Flags that reduce "does this account/class still exist?" checks to once per 15 minutes. On a miss the middleware queries Postgres, then writes the flag.
+A flag that reduces "does this class still exist?" checks to once per 15 minutes. On a miss the middleware queries Postgres, then writes the flag. Accounts are not cached: the account check reads the account on every request (one primary-key lookup), so deletions and bans apply at once.
 
 | Key                     | Value    | TTL    | Explicit invalidation |
 | :---------------------- | :------- | :----- | :-------------------- |
-| `auth_user:<accountId>` | `"true"` or `"banned"` | 15 min | Account deletion (`account.service.ts`), ban and unban (`moderation.service.ts`), removal from a class (`class.service.ts`) |
 | `auth_class:<classId>`  | `"true"` | 15 min | Class deletion and member removal (`class.service.ts`), class cleanup (`db.cleanup.ts`) |
 
-Only `"true"` passes the gate. The flag is written only when the account exists, has `deletedAt = null` and is not banned (`assertNotBanned`), and only with `NX`. A ban overwrites the key with `"banned"` (15 min), so a request that read the account before the ban committed cannot write `"true"` back afterwards; the ban applies at once. Unbanning deletes the marker. A soft-delete without a `del` only takes effect when the flag expires, so such an account can pass the gate for up to 15 minutes; hard deletes invalidate explicitly.
+Only `"true"` passes the gate.
 
 ---
 
@@ -121,13 +117,7 @@ The moderation panel (`/moderation`) has its own store and cookie (`TaskMinderMo
 
 ---
 
-## 5. Locks and Rate Limits
-
-**Locks**: `acquireLock(key, ttl)` runs `SET key <random token> EX <ttl> NX` and returns the token. The holder frees it in `finally` with `releaseLock(key, token)`, a Lua script that deletes the key only while it still holds the token, so a holder that outran the TTL cannot free the next holder's lock. `releaseLock` never throws (it logs), so it cannot hide the holder's own error. The TTL only covers a crash or a failed release.
-
-| Key               | TTL   | Protects                                   | On contention                        |
-| :---------------- | :---- | :----------------------------------------- | :----------------------------------- |
-| `mail_queue_lock` | 5 min | Two mail queue runs sending one mail twice | Run skipped, next one a minute later |
+## 5. Rate Limits
 
 Reports and decisions need no lock. A partial unique index on open reports (`reporterKey`, `targetType`, `targetId`) refuses a second open report by the same reporter, which is then treated as reported. A decision resolves its reports with a conditional update (`resolvedAt` still empty) as first step of its transaction, so a parallel decision on one of them waits for that row, finds it resolved and gets `410 Gone`.
 
@@ -135,11 +125,8 @@ Reports and decisions need no lock. A partial unique index on open reports (`rep
 
 | Key                         | Limit    | When exceeded                                                               |
 | :-------------------------- | :------- | :-------------------------------------------------------------------------- |
-| `report_mail:<hash(email)>` | 3 / day  | Report filed with no contact address (reporters can enter any address)      |
-| `report_notify:operator`    | 50 / day | No operator mail (still in digest)                                          |
+| `report_mail:<hash(email)>` | 3 / day  | Refused with 429, can be sent without address                               |
 
-`POST /api/reports` itself is limited in memory by `express-rate-limit`: 5 per minute per reporter (account or session), and 60 per minute per IP as a backstop against new anonymous sessions.
+`POST /api/reports` itself is limited in memory by `express-rate-limit`: 5 per minute and 20 per day per reporter (account or session; the daily cap keeps one reporter from using up the daily mail quota), and 60 per minute per IP as a backstop against new anonymous sessions.
 
-Everything else is bounded by the mail budget below (Brevo's free plan, 300 a day); reporter mails past it wait in the queue.
-
-**Mail budget**: `sendMail` counts every mail in `mail_budget:<UTC date>` (expires after 2 days) and refuses past 300. Receipts and decision mails to reporters are not sent directly: they are queued in the `mailQueue` table in the same transaction as the report or decision and sent by `processMailQueue` (every minute and right after queueing). A mail refused by the budget or failed (Brevo error, also Brevo's own daily quota) is tried again an hour later, and dropped with an error log once it has failed for 7 days. Operator mails and the digest are sent directly and only logged when they fail, since the digest covers them.
+**Mail queue** (Postgres, no Redis key): receipts and decision mails to reporters are not sent directly: they are queued in the `mailQueue` table in the same transaction as the report or decision and sent by `processMailQueue` (every minute and right after queueing). A run is skipped while another is still sending (in-process flag, one server process). A failed mail (Brevo error, also Brevo's daily quota of the free plan) is tried again an hour later, and dropped with an error log once it has failed for 7 days. The operator digest (hourly, only when reports came in during the last full hour) is sent directly and only logged when it fails.

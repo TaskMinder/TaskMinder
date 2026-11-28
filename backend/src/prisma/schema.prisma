@@ -283,8 +283,7 @@ model Upload {
   // uploader of the current files
   accountId           Int?
   classId             Int
-  // private, for moderation: last account that uploaded or edited it (also only name or description);
-  // null after anonymous edit
+  // private, for moderation: last account that uploaded or edited it; null after anonymous edit
   lastEditorAccountId Int?
 
   Files               FileMetadata[]
@@ -353,13 +352,12 @@ model Report {
   targetId          Int
   // author at report time (original homework/event author, uploader or reported account)
   targetAccountId   Int?
-  // last editor at report time (homework, events, uploads): same as targetAccountId when author edited last,
-  // null after anonymous edit
+  // last editor at report time; null after anonymous edit
   editorAccountId   Int?
-  // "account:<id>" or "session:<hash of the session id>", used for dedupe
+  // "account:<id>" or "session:<hash of the session id>", used for dedupe; null once resolved
   // FIXME: report_open_reporter_target_key partial unique index (reporterKey, targetType, targetId) for
   // open reports; manual migration in: add_moderation 20261124 (like account_username_unique_active_key)
-  reporterKey       String
+  reporterKey       String?
   // optional email, encrypted with encryption manager
   reporterContact   String?
   category          ReportCategory
@@ -386,8 +384,7 @@ model Report {
   @@map("report")
 }
 
-// mails reporters are owed (receipt DSA Art. 16(4), decision Art. 16(5)), queued in the transaction that makes them due;
-// sent and retried by mail queue, deleted once sent
+// reporter mails (DSA Art. 16(4), (5)), deleted once sent
 model MailQueue {
   mailId          Int     @id @default(autoincrement())
   // encrypted with encryption manager

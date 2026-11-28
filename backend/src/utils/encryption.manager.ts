@@ -127,8 +127,7 @@ export class EncryptionManager {
     return this.decryptWithKeys(payload, this.secondaryEncKeys);
   }
 
-  // for key rotation: tells whether payload is under the current primary key (decrypt() cannot, it falls back
-  // to secondary); null when it is not (old key, plaintext or malformed), which rotation expects, so nothing is logged
+  // for key rotation (decrypt() falls back to secondary): null when not under primary key, not logged
   decryptWithPrimaryOnly(payload: string): string | null {
     if (!this.isEncrypted(payload)) {
       return null;

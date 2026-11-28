@@ -9,7 +9,6 @@ function moderatorOf(req: Request): Moderator {
 
 export const login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    // session is new after login, so panel gets new CSRF token
     res.status(200).json(await moderationService.login(req.body, req));
   }
   catch (error) {

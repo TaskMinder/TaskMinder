@@ -280,7 +280,7 @@ This documentation describes all database tables defined in the current Prisma s
 | Report.targetType / targetId    | Enum / Integer | Reported shared homework, event, upload or account      | -                                                                |
 | Report.targetAccountId          | Integer?  | Original author of the reported content, or the reported account | **Links a user to an accusation**, even if it is dismissed    |
 | Report.editorAccountId          | Integer?  | Last editor of the reported homework, event or upload at report time (the author's id when the author edited last, empty after an anonymous edit) | **Links a user to an accusation**, even if it is dismissed |
-| Report.reporterKey              | String    | `account:<id>` or HMAC of the session id for anonymous reporters; prevents duplicate reports | Reveals who reported whom to the operator |
+| Report.reporterKey              | String?   | `account:<id>` or HMAC of the session id for anonymous reporters; prevents duplicate reports; cleared once the report is resolved | Reveals who reported whom to the operator while the report is open |
 | Report.reporterContact          | String?   | Optional reporter email, encrypted (aes-256-gcm)              | **Personal contact data**                                        |
 | Report.category / description   | Enum / String | Report reason and free-text explanation                   | **Free text may contain personal data about others**             |
 | Report.snapshot                 | JSON      | Copy of the reported content (text, subject/team/event type names, file metadata, uploader name; never file contents) | **Keeps content after it was deleted** |
@@ -295,15 +295,16 @@ This documentation describes all database tables defined in the current Prisma s
 
 **Solutions**:
 
-- **Contact data**: `reporterContact` is encrypted and cleared once the report is resolved; the decision mail to it waits in `MailQueue` (encrypted as well) until it is sent. Reporters can enter any address, so one email address can be stored on 3 reports per day; beyond that the report is filed without contact data or mail. All other mail volume is bounded by the daily mail budget, and mails past it wait in `MailQueue`.
+- **Contact data**: `reporterContact` is encrypted and cleared once the report is resolved; the decision mail to it waits in `MailQueue` (encrypted as well) until it is sent. Reporters can enter any address, so one email address can be given on 3 filed reports per day; beyond that the report is refused (429) and can be sent without an address. Mails Brevo refuses (also past its daily quota) wait in `MailQueue`.
 - **Retention**: open reports are kept until decided. Resolved reports are kept for **six months**, then deleted by the daily cleanup, only to check appeals against the original content and decision. Appeals have no deadline: the complaint system of DSA Art. 20 (open for at least six months) does not apply to micro and small providers (Art. 19(1)).
 - **Legal basis**: Art. 6(1)(c) GDPR with DSA Art. 16 and 17; Art. 6(1)(f) GDPR for keeping decisions for appeals. The privacy policy (about page, no. 6) states data, purpose and retention.
-- **Account deletion**: references are set to `null`; the account id inside `reporterKey` stays until the report is deleted.
-- **Operator mail**: the operator is mailed for 50 reports per day, the rest goes into a daily digest. Mails hold only report id, category, target type, time and panel address, never content.
+- **Reporter identity**: `reporterKey` is only needed to refuse duplicate open reports, so it is cleared with the decision; appeals name the report number instead.
+- **Account deletion**: references are set to `null`; the account id inside `reporterKey` of an open report stays until it is resolved.
+- **Operator mail**: the operator gets one mail per hour in which reports came in (at most 24 a day), holding only the number of new and open reports and the panel address, never content.
 - **Panel**: password, own session cookie, 3-hour login. The password is shared, so each login and decision is logged with the IP address and a hash of the panel session id
 - **Visibility**: class members cannot see whether an item was reported; private author ids are never returned by the API.
 - **Decisions**: made by a person. The decision mail and ban message (DSA Art. 16(5), 17) state decision, ground, reasons and how to appeal: by mail to support@taskminder.de, naming the report number or username, plus the right to go to court. A ban also resolves the open reports on the banned account from every class. Accepted ban appeals are lifted in the panel; removed content cannot be restored.
-- **Banned admins**: a banned admin cannot act, so a ban takes its admin role (an unban does not give it back). If the class then has no active admin, its longest active member becomes admin; a class without another active member stays without admin.
+- **Bans**: a ban removes the account from its class like a kick (joined teams, homework checks and uploader of its uploads go too); an unban does not restore the membership. If the class then has no admin, its longest member becomes admin; a class without another member stays without admin.
 
 ### 11. MailQueue Table
 
@@ -318,7 +319,7 @@ This documentation describes all database tables defined in the current Prisma s
 
 **Solutions**:
 
-- **Retention**: a mail is deleted as soon as it is sent. One that fails or is held back by the daily mail budget is tried again an hour later, and dropped once it has failed for 7 days (logged without the address).
+- **Retention**: a mail is deleted as soon as it is sent. One that fails (also past Brevo's daily quota) is tried again an hour later, and dropped once it has failed for 7 days (logged without the address).
 - **Key rotation**: the rotation script (`encrypt:rotate`) re-encrypts every recipient, reporter contact and class code that is not yet under the new primary key. Contacts that neither key decrypts are unusable and removed; such class codes are left as they are and listed in the log (an admin can generate a new class code).
 
 ---
@@ -349,8 +350,7 @@ Our Redis architecture serves as a cache to temporarily store data, reducing dat
 * Homework, events, lessons, timetables, teams, substitutions and upload metadata for each class (without the private author and last editor ids of homework, events and uploads)
 * Authenticated user and class information
 * User sessions (from express-session) and moderation panel sessions (3 hours)
-* Daily counters of reports per contact address, keyed by a hash of the email address, and of operator mails (expire after 24 hours)
-* Daily counter of all mails sent, without any address (expires after 2 days)
+* Daily counters of reports per contact address, keyed by a hash of the email address (expire after 24 hours)
 
 ---
 
@@ -358,7 +358,7 @@ Our Redis architecture serves as a cache to temporarily store data, reducing dat
 
 Moderation mails are sent through [Brevo](https://www.brevo.com) (Brevo SAS, Paris), which acts as a processor under the data processing agreement in its [terms of service](https://www.brevo.com/legal/termsofuse/#appendix-3-data-processing-agreement-dpa). Its servers are in France and Belgium; sub-processors may in individual cases act outside the EU, safeguarded by standard contractual clauses and the EU-US Data Privacy Framework. Brevo keeps a log of each sent mail (recipient, subject, time and a preview of the content, which can be turned off in the Brevo settings). It receives:
 
-* Operator mails to support@taskminder.de: report id, category, target type, time and the address of the moderation panel; once a day a mail with the number of open reports
+* Operator mails to support@taskminder.de: at most one per hour with the number of new and open reports and the address of the moderation panel
 * For reporters who entered an email: the address, plus the receipt and the decision text with its reasons and the way to appeal
 
 ---

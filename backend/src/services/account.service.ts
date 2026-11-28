@@ -2,7 +2,7 @@ import bcrypt from "bcrypt";
 import { prisma } from "../config/prisma.js";
 import { Session, SessionData } from "express-session";
 import { RequestError } from "../@types/requestError.js";
-import { CACHE_KEY_PREFIXES, redisClient } from "../config/redis.js";
+import { CACHE_KEY_PREFIXES } from "../config/redis.js";
 import {
   changePasswordTypeBody,
   changeUsernameTypeBody,
@@ -53,8 +53,7 @@ export default {
         accountIdInDatabase = accountInDb.accountId;
         res.account = { username: accountInDb.username, accountId: accountIdInDatabase };
         session.account = { accountId: accountInDb.accountId, username: accountInDb.username };
-        // banned account stays logged in without its class
-        // -> can log out and delete account, and sees the statement of reasons
+        // banned account stays logged in without class: can log out, delete itself and read the statement
         if (accountInDb.bannedAt !== null) {
           delete session.classId;
           const bannedAt = Number(accountInDb.bannedAt);
@@ -286,10 +285,8 @@ export default {
         accountId
       }
     });
-    // if user is in a class, evaluate if user is admin;
-    // banned account cannot leave its class first, so it may delete itself anyway
-    // (a ban takes its admin role; a class keeps an active admin besides a banned one)
-    if (joinedClassAccount && account.bannedAt === null) {
+    // if user is in a class, evaluate if user is admin
+    if (joinedClassAccount) {
       if (joinedClassAccount.permissionLevel === 3) {
         const err: RequestError = {
           name: "Conflict",
@@ -349,7 +346,6 @@ export default {
     if (joinedClassAccount){
       await invalidateCache(CACHE_KEY_PREFIXES.UPLOADMETADATA, joinedClassAccount.classId.toString());
     }
-    await redisClient.del(`auth_user:${account.accountId}`);
     delete session.account;
   },
 

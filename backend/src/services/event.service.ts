@@ -51,8 +51,8 @@ type SortableEvent = {
   [key: string]: unknown;
 };
 
-// in-memory comparator mirroring EVENT_ORDER_BY, used when merging shared
-// and personal partitions read from the cache into single ordered list
+// in-memory comparator mirroring EVENT_ORDER_BY, used when merging the shared
+// and personal partitions read from the cache into a single ordered list
 // (nullable endDate/description sort last, matching Postgres NULLS LAST on ASC)
 // eslint-disable-next-line complexity
 function compareEvent(a: SortableEvent, b: SortableEvent): number {
@@ -149,7 +149,7 @@ async function authorizeEventMutation(
   await assertPermissionLevel(session, ROLES.EDITOR);
 }
 
-// after an event was deleted, shared by deleteEvent and moderation (after its decision transaction)
+// after an event was deleted (deleteEvent, moderation)
 export async function announceEventRemoval(classId: number, ownerAccountId: number | null): Promise<void> {
   // invalidate cache
   await invalidateCache(CACHE_KEY_PREFIXES.EVENT, classId.toString(), ownerAccountId?.toString());
@@ -167,7 +167,7 @@ export const eventService = {
     const sharedKey = generateCacheKey(CACHE_KEY_PREFIXES.EVENT, session.classId!);
     const shared = await fetchEventPartition(sharedKey, { classId, accountId: null });
 
-    // anonymous/no-account viewers only ever see shared events
+    // anonymous / no-account viewers only ever see shared events
     if (accountId === undefined) {
       return shared;
     }
@@ -176,7 +176,7 @@ export const eventService = {
     const personalKey = generateCacheKey(CACHE_KEY_PREFIXES.EVENT, session.classId!, accountId.toString());
     const personal = await fetchEventPartition(personalKey, { classId, accountId });
 
-    // merge two partitions and re-sort to preserve canonical order
+    // merge the two partitions and re-sort to preserve canonical order
     return [...shared, ...personal].sort(compareEvent);
   },
 
@@ -359,7 +359,7 @@ export const eventService = {
           endDate: endDate,
           teamId: storedTeamId,
           accountId: newAccountId,
-          // the original author stays; an anonymous edit leaves no editor
+          // author stays; null after anonymous edit
           lastEditorAccountId: session.account?.accountId ?? null
         }
       });

@@ -38,7 +38,7 @@ export function ensureCsrfSessionToken(req: Request): string {
   return req.session.csrfToken;
 }
 
-// GET handler for token; only pages of this site may read it
+// GET handler for app and panel token; only pages of this site may read it
 export function sendCsrfToken(req: Request, res: Response): void {
   const secFetchSite = req.header("sec-fetch-site");
   if (secFetchSite && !["same-origin", "same-site", "none"].includes(secFetchSite)) {

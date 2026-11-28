@@ -95,7 +95,7 @@ async function resolveHomeworkScope(
       };
       throw err;
     }
-    // ensure account actually belongs to this class (also repairs stale session state)
+    // ensure the account actually belongs to this class (also repairs stale session state)
     await assertPermissionLevel(session, ROLES.MEMBER);
     return { accountId: session.account.accountId, storedTeamId: PERSONAL_TEAM_ID };
   }
@@ -127,7 +127,7 @@ async function authorizeHomeworkMutation(
   await assertPermissionLevel(session, ROLES.EDITOR);
 }
 
-// after a homework was deleted, shared by deleteHomework and moderation (after its decision transaction)
+// after a homework was deleted (deleteHomework, moderation)
 export async function announceHomeworkRemoval(classId: number, ownerAccountId: number | null): Promise<void> {
   // invalidate cache
   await invalidateCache(CACHE_KEY_PREFIXES.HOMEWORK, classId.toString(), ownerAccountId?.toString());
@@ -340,7 +340,7 @@ const homeworkService = {
           submissionDate: submissionDate,
           teamId: storedTeamId,
           accountId: newAccountId,
-          // the original author stays; an anonymous edit leaves no editor
+          // author stays; null after anonymous edit
           lastEditorAccountId: session.account?.accountId ?? null
         }
       });
@@ -400,7 +400,7 @@ const homeworkService = {
     const sharedKey = generateCacheKey(CACHE_KEY_PREFIXES.HOMEWORK, session.classId!);
     const shared = await fetchHomeworkPartition(sharedKey, { classId, accountId: null });
 
-    // anonymous/no-account viewers only ever see shared homework
+    // anonymous / no-account viewers only ever see shared homework
     if (accountId === undefined) {
       return shared;
     }
@@ -409,7 +409,7 @@ const homeworkService = {
     const personalKey = generateCacheKey(CACHE_KEY_PREFIXES.HOMEWORK, session.classId!, accountId.toString());
     const personal = await fetchHomeworkPartition(personalKey, { classId, accountId });
 
-    // merge two partitions and re-sort to preserve canonical order
+    // merge the two partitions and re-sort to preserve the canonical order
     return [...shared, ...personal].sort(compareHomework);
   },
 

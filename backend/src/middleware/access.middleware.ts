@@ -13,9 +13,6 @@ export const ROLES = {
   ADMIN: 3
 } as const;
 
-// account checks are cached this long; a ban marks the key for as long
-export const AUTH_USER_TTL_SECONDS = 15 * 60;
-
 type AccessRequirement = "ACCOUNT" | "CLASS" | "MODERATOR" | keyof typeof ROLES;
 type BanFields = { bannedAt: bigint | null; banGround: DecisionGround | null; banReason: string | null };
 
@@ -58,43 +55,27 @@ async function checkAccountAccess(req: Request, allowBanned: boolean): Promise<v
     throwError("Unauthorized", 401, "User not logged in");
   }
 
-  const authUserRedis = await redisClient.get(`auth_user:${req.session.account.accountId}`);
+  // not cached: deletion and bans apply at once
+  const account = await prisma.account.findUnique({
+    where: { accountId: req.session.account.accountId },
+    select: { deletedAt: true, bannedAt: true, banGround: true, banReason: true }
+  });
 
-  // only "true" passes; a ban writes "banned" so that requests in flight cannot cache the account as allowed
-  if (authUserRedis !== "true") {
-    const account = await prisma.account.findUnique({
-      where: { accountId: req.session.account.accountId }
-    });
-
-    if (!account) {
-      delete req.session.account;
-      throwError(
-        "Unauthorized",
-        401,
-        "Account not found. You have been logged out"
-      );
-    }
-    // account was deleted, invalid session
-    if (account.deletedAt !== null) {
-      delete req.session.account;
-      throwError(
-        "Unauthorized",
-        401,
-        "Account not found. You have been logged out"
-      );
-    }
-    if (allowBanned && account.bannedAt !== null) {
-      // banned account passes without its class and is not cached ("true" in auth cache means not banned)
-      delete req.session.classId;
-      return;
-    }
-    assertNotBanned(account, req.session);
-    // NX: never overwrites the "banned" marker of a ban that committed after the read above
-    await redisClient.set(`auth_user:${req.session.account.accountId}`, "true", {
-      expiration: { type: "EX", value: AUTH_USER_TTL_SECONDS },
-      condition: "NX"
-    });
+  // account was deleted, invalid session
+  if (!account || account.deletedAt !== null) {
+    delete req.session.account;
+    throwError(
+      "Unauthorized",
+      401,
+      "Account not found. You have been logged out"
+    );
   }
+  // logout and account deletion stay open to banned account
+  if (allowBanned && account.bannedAt !== null) {
+    delete req.session.classId;
+    return;
+  }
+  assertNotBanned(account, req.session);
 }
 
 // the panel shows its login form on 401
@@ -151,10 +132,11 @@ async function checkPermissionLevel(
   await assertPermissionLevel(req.session, requiredPermission);
 }
 
-// Session-based permission check
-// resolves effective permission from account's class membership, or class
+// Session-based permission check, extracted so services can reuse the exact same
+// logic (e.g. to gate shared vs. personal homework/events without a route-level role).
+// Resolves the effective permission from the account's class membership, or the class
 // default for anonymous users, repairs/clears stale session state, and throws when
-// level is insufficient.
+// the level is insufficient.
 export async function assertPermissionLevel(
   session: Session & Partial<SessionData>,
   requiredPermission: number
@@ -164,17 +146,17 @@ export async function assertPermissionLevel(
   if (session.account) {
     const joined = await prisma.joinedClass.findUnique({
       where: { accountId: session.account.accountId },
-      select: { permissionLevel: true, classId: true, Account: { select: { bannedAt: true, banGround: true, banReason: true } } }
+      select: { permissionLevel: true, classId: true }
     });
 
     if (!joined) {
+      // a ban removes the account from its class: 403 with statement of reasons, login stays
+      await assertSessionAccountNotBanned(session);
       // session is stale or tampered
       delete session.account;
       delete session.classId;
       throwError("Unauthorized", 401, "Account is not linked to any class");
     }
-    // there is no account -> session index, so bans are enforced here at check time
-    assertNotBanned(joined.Account, session);
 
     if (session.classId) {
       const sessionClassId = parseInt(session.classId, 10);
@@ -207,7 +189,7 @@ export async function assertPermissionLevel(
   }
 }
 
-// banned account keeps login but loses class, so it cannot stay on as anonymous member after logout
+// banned account keeps login but no class, so it cannot stay on as anonymous member after logout
 export function assertNotBanned(account: BanFields, session: Session & Partial<SessionData>): void {
   if (account.bannedAt === null) {
     return;
@@ -220,7 +202,7 @@ export function assertNotBanned(account: BanFields, session: Session & Partial<S
   );
 }
 
-// for routes without access gate (/join): banned account must not get membership
+// for /join and accounts without class
 export async function assertSessionAccountNotBanned(session: Session & Partial<SessionData>): Promise<void> {
   if (!session.account) {
     return;

@@ -58,7 +58,7 @@ export function requireBase64Key(key: string): string {
   return base64EncryptionKey;
 }
 
-// missing value (in dev) allowed: mails written to log, moderation panel stays locked
+// may be missing in development: mails go to the log, panel stays locked
 export function requireUnlessDevelopment(key: string, nodeEnv: string): string | null {
   const value = process.env[key];
   if (!value && nodeEnv !== "DEVELOPMENT"){
@@ -67,7 +67,7 @@ export function requireUnlessDevelopment(key: string, nodeEnv: string): string |
   return value || null;
 }
 
-// one password for everyone who moderates and panel is reachable from internet -> must be long
+// shared password of a panel reachable from the internet
 const MIN_MODERATION_PASSWORD_LENGTH = 24;
 
 export function requireModerationPassword(nodeEnv: string): string | null {

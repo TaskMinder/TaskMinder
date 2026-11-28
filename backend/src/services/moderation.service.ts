@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { Request } from "express";
 import { Db, prisma } from "../config/prisma.js";
 import { envConfig } from "../config/env.js";
-import { redisClient } from "../config/redis.js";
+import { CACHE_KEY_PREFIXES, invalidateCache } from "../config/redis.js";
 import logger from "../config/logger.js";
 import { disconnectAccountSockets, emitSocketToClass, SOCKET_EVENTS } from "../config/socket.js";
 import { destroySession, MODERATOR_SESSION_MS, regenerateSession } from "../config/session.js";
@@ -14,9 +14,9 @@ import { ensureCsrfSessionToken } from "../middleware/csrfProtection.middleware.
 import { announceHomeworkRemoval } from "./homework.service.js";
 import { announceEventRemoval } from "./event.service.js";
 import { announceUploadRemoval, deleteUploadRecord, openUploadFile } from "./upload.service.js";
-import { announceClassCodeChange, removeLoggedOutSessions, rotateClassCode } from "./class.service.js";
+import { announceClassCodeChange, removeLoggedOutSessions, removeMemberData, rotateClassCode } from "./class.service.js";
 import { loadReportTarget } from "./report.service.js";
-import { AUTH_USER_TTL_SECONDS, ROLES } from "../middleware/access.middleware.js";
+import { ROLES } from "../middleware/access.middleware.js";
 import { reporterDecisionMail } from "../utils/moderation.statements.js";
 import { DecisionGround, ModerationAction, ReportTargetType } from "../prisma/generated/prisma/enums.js";
 import { Prisma } from "../prisma/generated/prisma/client.js";
@@ -34,20 +34,20 @@ type Report = NonNullable<Awaited<ReturnType<typeof prisma.report.findUnique>>>;
 type AccountInfo = {
   accountId: number;
   username: string;
-  // deleted account cannot be banned (purged after deletion period)
+  // deleted account cannot be banned
   deleted: boolean;
   bannedAt: bigint | null;
 } | null;
-// panel password is shared -> decision is traced to panel login it came from
+// panel password is shared, so decisions are logged with the panel login they came from
 export type Moderator = { ip: string | undefined; sessionId: string };
-// content deleted in decision transaction; caches and sockets are updated after commit
+// runs after commit: caches and sockets
 type AnnounceRemoval = () => Promise<void>;
-// class of banned admin, which lost its role; promotedAccountId: member who took over, null when an active admin is left or no one can
-type AdminChange = { classId: number; promotedAccountId: number | null };
+// class the banned account was removed from; promotedAccountId: new admin, null when none was needed or possible
+type ClassRemoval = { classId: number; promotedAccountId: number | null };
 type AppliedDecision = {
-  // null when nothing was removed, also when users had deleted content already
+  // null when nothing was removed (also when content was already gone)
   announceRemoval: AnnounceRemoval | null;
-  adminChange: AdminChange | null;
+  classRemoval: ClassRemoval | null;
 };
 type ClaimedReport = { reportId: number; reporterContact: string | null };
 type QueuedMail = Parameters<typeof queueMails>[1][number];
@@ -55,7 +55,7 @@ type QueuedMail = Parameters<typeof queueMails>[1][number];
 const OVERVIEW_RESOLVED_REPORTS = 20;
 const REMOVABLE_TARGET_TYPES: ReportTargetType[] = ["homework", "event", "upload"];
 
-// bannable: author and last editor that are neither deleted nor banned yet (a second ban would overwrite first statement)
+// bannable: author and last editor that are neither deleted nor banned yet
 function allowedActions(report: Report, bannable: number[]): ModerationAction[] {
   const canRemove = REMOVABLE_TARGET_TYPES.includes(report.targetType) && report.classId !== null;
   const canBan = bannable.length > 0;
@@ -63,7 +63,7 @@ function allowedActions(report: Report, bannable: number[]): ModerationAction[] 
   if (canRemove) actions.push("remove");
   if (canBan) actions.push("ban");
   if (canRemove && canBan) actions.push("remove_and_ban");
-  // locks out anonymous members (also anonymous authors or editors) without removing or banning anything
+  // locks out anonymous authors and editors
   if (report.classId !== null) actions.push("rotate_class_code");
   return actions;
 }
@@ -76,12 +76,10 @@ function bannableAccountIds(author: AccountInfo, editor: AccountInfo): number[] 
   return [...new Set([author, editor].filter(isBannable).map(account => account.accountId))];
 }
 
-// account ban hits: author unless operator picked last editor
 function banAccountIdOf(report: Report, banTarget: BanDecision["banTarget"]): number | null {
   return banTarget === "editor" ? report.editorAccountId : report.targetAccountId;
 }
 
-// narrows decision so banTarget can be read
 function isBanDecision(decision: resolveReportTypeBody): decision is BanDecision {
   return decision.action === "ban" || decision.action === "remove_and_ban";
 }
@@ -94,7 +92,7 @@ function describeModerator(moderator: Moderator): string {
   return `by moderator ip ${moderator.ip ?? "unknown"}, session ${encryptionManager.hash(moderator.sessionId).slice(0, 12)}`;
 }
 
-// open: only report that is not decided yet (410 otherwise, decision is made once)
+// open: 410 when already decided
 async function loadReport(reportId: number, { open = false } = {}): Promise<Report> {
   const report = await prisma.report.findUnique({ where: { reportId } });
   if (open && (!report || report.resolvedAt !== null)) {
@@ -106,14 +104,13 @@ async function loadReport(reportId: number, { open = false } = {}): Promise<Repo
   return report;
 }
 
-// open reports a decision resolves along with this one: same target in report's class (an account reported
-// in two classes may have done different things in each; homework, events and uploads belong to one class anyway)
+// open reports one decision resolves: same target in same class
 function sameTargetFilter(report: Report): Prisma.ReportWhereInput {
   return { targetType: report.targetType, targetId: report.targetId, classId: report.classId };
 }
 
-// resolves open reports and returns them with their contact; this is also the claim: a parallel decision on one
-// of them waits for its row, then finds it resolved and claims nothing (no Redis lock needed)
+// resolving is the claim: a parallel decision waits for the rows, then finds them resolved;
+// reporter key is only needed for dedupe of open reports, so it leaves with the claim
 async function claimReports(
   tx: Db,
   where: Prisma.ReportWhereInput,
@@ -121,14 +118,12 @@ async function claimReports(
 ): Promise<ClaimedReport[]> {
   return await tx.report.updateManyAndReturn({
     where: { ...where, resolvedAt: null },
-    data,
+    data: { ...data, reporterKey: null },
     select: { reportId: true, reporterContact: true }
   });
 }
 
-// null when content is gone already (deleted by users before decision or in parallel to it):
-// transaction alone does not stop a parallel delete between read and delete (read committed locks nothing on read),
-// so delete itself is existence check; read before it only finds owner for cache
+// null when content is already gone; the delete count is the existence check (a read locks nothing)
 async function deleteReportedContent(tx: Db, report: Report): Promise<AnnounceRemoval | null> {
   const classId = report.classId!;
   if (report.targetType === "homework") {
@@ -143,7 +138,6 @@ async function deleteReportedContent(tx: Db, report: Report): Promise<AnnounceRe
     const { count } = await tx.event.deleteMany({ where });
     return event && count > 0 ? () => announceEventRemoval(classId, event.accountId) : null;
   }
-  // accounts have no content (allowedActions offers no remove for them)
   if (report.targetType !== "upload") {
     return null;
   }
@@ -157,15 +151,13 @@ async function deleteReportedContent(tx: Db, report: Report): Promise<AnnounceRe
   return () => announceUploadRemoval(upload);
 }
 
-// class without an active admin gets its longest active member as admin (ids increase as members join);
-// banned member cannot act, so it neither counts as admin nor becomes one; null when no one was promoted
+// class without admin gets its longest member as admin; null when no one was promoted
 async function promoteAdminIfMissing(tx: Db, classId: number): Promise<number | null> {
-  const activeMember = { classId, Account: { bannedAt: null } };
-  const admin = await tx.joinedClass.findFirst({ where: { ...activeMember, permissionLevel: ROLES.ADMIN }, select: { accountId: true } });
+  const admin = await tx.joinedClass.findFirst({ where: { classId, permissionLevel: ROLES.ADMIN }, select: { accountId: true } });
   if (admin !== null) {
     return null;
   }
-  const longestMember = await tx.joinedClass.findFirst({ where: activeMember, orderBy: { joinedClassId: "asc" }, select: { accountId: true } });
+  const longestMember = await tx.joinedClass.findFirst({ where: { classId }, orderBy: { joinedClassId: "asc" }, select: { accountId: true } });
   if (longestMember === null) {
     return null;
   }
@@ -173,9 +165,8 @@ async function promoteAdminIfMissing(tx: Db, classId: number): Promise<number | 
   return longestMember.accountId;
 }
 
-// only account that is not banned yet, so first statement stays;
-// banned admin loses its role (it cannot act any more), so its class does not wait for it
-async function banAccount(tx: Db, accountId: number, ground: DecisionGround, reason: string, bannedAt: number): Promise<AdminChange | null> {
+// first ban stays (409 for a second); banned account leaves its class, an unban does not restore it
+async function banAccount(tx: Db, accountId: number, ground: DecisionGround, reason: string, bannedAt: number): Promise<ClassRemoval | null> {
   const banned = await tx.account.updateMany({
     where: { accountId, bannedAt: null },
     data: { bannedAt: BigInt(bannedAt), banGround: ground, banReason: reason }
@@ -183,12 +174,14 @@ async function banAccount(tx: Db, accountId: number, ground: DecisionGround, rea
   if (banned.count === 0) {
     throwError("Conflict", 409, "Dieses Konto ist bereits gesperrt");
   }
-  const membership = await tx.joinedClass.findUnique({ where: { accountId }, select: { classId: true, permissionLevel: true } });
-  if (membership?.permissionLevel !== ROLES.ADMIN) {
+  const membership = await tx.joinedClass.findUnique({ where: { accountId }, select: { classId: true } });
+  if (membership === null) {
     return null;
   }
-  await tx.joinedClass.update({ where: { accountId }, data: { permissionLevel: ROLES.MEMBER } });
-  return { classId: membership.classId, promotedAccountId: await promoteAdminIfMissing(tx, membership.classId) };
+  const { classId } = membership;
+  await tx.joinedClass.delete({ where: { accountId } });
+  await removeMemberData(tx, accountId, classId);
+  return { classId, promotedAccountId: await promoteAdminIfMissing(tx, classId) };
 }
 
 async function findAccountInfo(accountId: number | null): Promise<AccountInfo> {
@@ -203,14 +196,13 @@ async function findAccountInfo(accountId: number | null): Promise<AccountInfo> {
   return { accountId, ...rest, deleted: deletedAt !== null };
 }
 
-// author and last editor of reported content; one lookup when author edited last
+// author and last editor; one lookup when author edited last
 async function findReportAccounts(report: Report): Promise<[AccountInfo, AccountInfo]> {
   const author = findAccountInfo(report.targetAccountId);
   const editor = report.editorAccountId === report.targetAccountId ? author : findAccountInfo(report.editorAccountId);
   return await Promise.all([author, editor]);
 }
 
-// schema already requires ground and reason for every action but dismiss (DSA Art. 17)
 async function assertDecisionAllowed(report: Report, decision: resolveReportTypeBody): Promise<void> {
   const bannable = bannableAccountIds(...await findReportAccounts(report));
   if (!allowedActions(report, bannable).includes(decision.action)) {
@@ -229,8 +221,7 @@ function rotatesClassCode(report: Report, decision: resolveReportTypeBody): bool
   return rotate && report.classId !== null;
 }
 
-// one transaction: when step is refused or fails, nothing of decision is applied and can be made again;
-// banned user still knows class code and anonymous authors keep theirs, so remove and ban can rotate it as well
+// one transaction: a refused or failed step applies nothing, so the decision can be made again
 async function applyDecision(tx: Db, report: Report, decision: resolveReportTypeBody, decidedAt: number): Promise<AppliedDecision> {
   const ground = decision.action === "dismiss" ? null : decision.ground;
   const resolution = { decisionGround: ground, decisionReason: decision.reason || null, resolvedAt: BigInt(decidedAt) };
@@ -240,13 +231,12 @@ async function applyDecision(tx: Db, report: Report, decision: resolveReportType
     throwError("Gone", 410, "Diese Meldung ist bereits bearbeitet oder existiert nicht mehr");
   }
 
-  let adminChange: AdminChange | null = null;
-  // a ban holds everywhere: open reports on banned account from every class are resolved as ban as well
+  let classRemoval: ClassRemoval | null = null;
+  // a ban holds everywhere: open reports on the account from every class are resolved with it
   let accountReports: ClaimedReport[] = [];
   if (isBanDecision(decision)) {
     const bannedAccountId = banAccountIdOf(report, decision.banTarget)!;
-    // refused when parallel decision on another target banned account first
-    adminChange = await banAccount(tx, bannedAccountId, decision.ground, decision.reason, decidedAt);
+    classRemoval = await banAccount(tx, bannedAccountId, decision.ground, decision.reason, decidedAt);
     accountReports = await claimReports(tx, { targetType: "account", targetId: bannedAccountId }, { ...resolution, action: "ban" });
   }
   const announceRemoval = removesContent(decision.action) ? await deleteReportedContent(tx, report) : null;
@@ -254,7 +244,7 @@ async function applyDecision(tx: Db, report: Report, decision: resolveReportType
     await rotateClassCode(report.classId!, tx);
   }
 
-  // DSA Art. 16(5): queued with decision, so it cannot commit without them; contact leaves report, mail queue keeps it until sent
+  // DSA Art. 16(5): mails are queued with the decision; contact leaves the report, the queue keeps it until sent
   await tx.report.updateMany({
     where: { reportId: { in: [...claimed, ...accountReports].map(claimedReport => claimedReport.reportId) } },
     data: { reporterContact: null }
@@ -268,13 +258,11 @@ async function applyDecision(tx: Db, report: Report, decision: resolveReportType
     ...mailsFor(claimed, decision.action, removesContent(decision.action) && announceRemoval === null),
     ...mailsFor(accountReports, "ban", false)
   ]);
-  return { announceRemoval, adminChange };
+  return { announceRemoval, classRemoval };
 }
 
-// after commit: failure here leaves decision in place -> only logged;
-// steps are independent, so one that fails does not skip the others
+// after commit: failed steps are only logged and do not skip the others
 async function announceDecision(report: Report, decision: resolveReportTypeBody, applied: AppliedDecision): Promise<void> {
-  // in background: a batch of mails can take long, and the decision is in place already
   void processMailQueue();
   const steps: (() => unknown)[] = [];
   if (applied.announceRemoval !== null) {
@@ -282,25 +270,25 @@ async function announceDecision(report: Report, decision: resolveReportTypeBody,
   }
   if (isBanDecision(decision)) {
     const accountId = banAccountIdOf(report, decision.banTarget)!;
-    // replaces cached "true" (else ban would wait up to 15min); a request in flight cannot set it back (NX)
-    steps.push(() => redisClient.set(`auth_user:${accountId}`, "banned", {
-      expiration: { type: "EX", value: AUTH_USER_TTL_SECONDS }
-    }));
     steps.push(() => disconnectAccountSockets(accountId));
     logger.info(`account ${accountId} was banned`);
   }
-  const { adminChange } = applied;
-  if (adminChange !== null) {
-    steps.push(() => emitSocketToClass(adminChange.classId, SOCKET_EVENTS.MEMBERS));
-    const promoted = adminChange.promotedAccountId === null ? "" : `, account ${adminChange.promotedAccountId} was made admin`;
-    logger.info(`banned admin lost its role in class ${adminChange.classId}${promoted}`);
+  const { classRemoval } = applied;
+  if (classRemoval !== null) {
+    const { classId, promotedAccountId } = classRemoval;
+    // removed uploader shows up in upload metadata
+    steps.push(() => invalidateCache(CACHE_KEY_PREFIXES.UPLOADMETADATA, classId.toString()));
+    steps.push(() => emitSocketToClass(classId, SOCKET_EVENTS.MEMBERS));
+    steps.push(() => emitSocketToClass(classId, SOCKET_EVENTS.UPLOADS));
+    const promoted = promotedAccountId === null ? "" : `, account ${promotedAccountId} was made admin`;
+    logger.info(`banned account was removed from class ${classId}${promoted}`);
   }
   if (rotatesClassCode(report, decision)) {
     const classId = report.classId!;
     steps.push(() => announceClassCodeChange(classId));
     steps.push(() => removeLoggedOutSessions(classId));
   }
-  // async wrapper turns synchronous throws into rejections as well
+  // async wrapper turns synchronous throws into rejections
   const results = await Promise.allSettled(steps.map(async step => await step()));
   for (const result of results) {
     if (result.status === "rejected") {
@@ -312,7 +300,7 @@ async function announceDecision(report: Report, decision: resolveReportTypeBody,
 const moderationService = {
   async login(reqBody: loginTypeBody, req: Request) {
     const expected = envConfig.moderationPassword;
-    // both sides are hashed, so compare has fixed length
+    // hashed, so both sides have the same length
     const isPasswordValid = expected !== null && timingSafeEqual(
       Buffer.from(encryptionManager.hash(reqBody.password), "utf8"),
       Buffer.from(encryptionManager.hash(expected), "utf8")
@@ -320,14 +308,13 @@ const moderationService = {
     if (!isPasswordValid) {
       throwError("Unauthorized", 401, "Falsches Passwort");
     }
-    // session id known before login gets no moderator rights; CSRF token is new as well
+    // new session id and CSRF token on login
     await regenerateSession(req);
     req.session.moderatorUntil = Date.now() + MODERATOR_SESSION_MS;
     logger.info(`moderation login ${describeModerator({ ip: req.ip, sessionId: req.sessionID })}`);
     return { loginUntil: req.session.moderatorUntil, csrfToken: ensureCsrfSessionToken(req) };
   },
 
-  // panel session is gone with CSRF token (app session has seperate cookie)
   async logout(req: Request) {
     await destroySession(req);
   },
@@ -344,7 +331,7 @@ const moderationService = {
       orderBy: { resolvedAt: "desc" },
       take: OVERVIEW_RESOLVED_REPORTS
     });
-    // deleted accounts are purged with their ban, so there is nothing to lift
+    // deleted accounts are purged with their ban
     const banned = await prisma.account.findMany({
       where: { bannedAt: { not: null }, deletedAt: null },
       select: { accountId: true, username: true, banGround: true, banReason: true, bannedAt: true },
@@ -353,7 +340,7 @@ const moderationService = {
     return { open, resolved, banned };
   },
 
-  // resolved reports stay readable until deleted, so appeals can be checked against them
+  // resolved reports stay readable until deleted, for appeals
   async getReport(reqParams: getReportTypeParams) {
     const { id: reportId } = reqParams;
     const report = await loadReport(reportId);
@@ -366,18 +353,15 @@ const moderationService = {
       report.targetAccountId === null
         ? 0
         : prisma.report.count({ where: { targetAccountId: report.targetAccountId, reportId: { lt: reportId } } }),
-      // operator should know how many reports a decision resolves (a ban also resolves reports on the account)
       isOpen ? prisma.report.count({ where: { ...sameTargetFilter(report), resolvedAt: null, reportId: { not: reportId } } }) : 0,
-      // decision is on content as it is now, which may have been edited since report;
-      // null when it is gone (or reported account left class)
+      // content as it is now; null when gone (or account left class)
       report.classId === null ? null : loadReportTarget(report.targetType, report.targetId, report.classId)
     ]);
 
     return {
-      // reporter's identity and contact stay on server (undefined is left out of JSON)
+      // reporter's identity and contact stay on server
       report: { ...report, reporterKey: undefined, reporterContact: undefined, hasReporterContact: report.reporterContact !== null },
       current: current?.content ?? null,
-      // also true when only subject, team or event type name changed
       changedSinceReport: current !== null && !isDeepStrictEqual(current.content, report.snapshot),
       author,
       editor,
@@ -388,8 +372,7 @@ const moderationService = {
     };
   },
 
-  // file of reported upload as it is now (getReport: current.files); always download,
-  // so panel's origin never renders reported content
+  // always as download, so the panel's origin never renders reported content
   async getReportFile(reqParams: getReportFileTypeParams) {
     const { id: reportId, fileId } = reqParams;
     const report = await loadReport(reportId);
@@ -420,9 +403,6 @@ const moderationService = {
     if (unbanned.count === 0) {
       throwError("Not Found", 404, "Gesperrtes Konto nicht gefunden");
     }
-    // the "banned" marker would only keep the account from being cached, so failing here is just logged
-    await redisClient.del(`auth_user:${accountId}`)
-      .catch(error => logger.error(`Failed to clear the ban marker of account ${accountId}: ${error}`));
     logger.info(`account ${accountId} was unbanned ${describeModerator(moderator)}`);
   }
 };

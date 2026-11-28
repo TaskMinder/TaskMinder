@@ -10,9 +10,7 @@ const TRANSACTION_TIMEOUT_MS = 2 * 60 * 1000;
 
 type Readable = { plaintext: string; underPrimary: boolean };
 
-// rotation moves old primary key to ENCRYPTION_KEY_SECONDARY and sets a new primary;
-// underPrimary: already under new primary key, else (old key or plaintext) it must be re-encrypted.
-// decrypt() cannot tell, it falls back to secondary key; throws when neither key fits
+// old primary key moves to ENCRYPTION_KEY_SECONDARY; underPrimary: no re-encryption needed; throws when neither key fits
 function readForRotation(payload: string): Readable {
   const underPrimary = encryptionManager.decryptWithPrimaryOnly(payload);
   if (underPrimary !== null) {
@@ -21,7 +19,6 @@ function readForRotation(payload: string): Readable {
   return { plaintext: encryptionManager.decryptWithSecondary(payload), underPrimary: false };
 }
 
-// null when neither key fits (encrypted with key older than secondary)
 function tryReadForRotation(payload: string): Readable | null {
   try {
     return readForRotation(payload);
@@ -31,8 +28,7 @@ function tryReadForRotation(payload: string): Readable | null {
   }
 }
 
-// re-encrypted when not under primary key, re-hashed when lookup key changed;
-// class codes neither key decrypts stay as they are and are reported (admin can generate a new class code)
+// unreadable class codes stay and are reported (admin can generate a new one)
 async function rotateClassCodes(tx: Db): Promise<{ updated: number; unreadableClassIds: number[] }> {
   const classes = await tx.class.findMany({ select: { classId: true, classCode: true, classCodeHash: true } });
   let updated = 0;
@@ -56,8 +52,7 @@ async function rotateClassCodes(tx: Db): Promise<{ updated: number; unreadableCl
   return { updated, unreadableClassIds };
 }
 
-// reporter contacts of open reports and recipients of queued mails; one neither key decrypts can never be used,
-// so it is removed (contact cleared, queued mail deleted)
+// reporter contacts and queued mail recipients; unreadable ones are removed
 async function rotateModerationContacts(tx: Db): Promise<{ updated: number; removed: number }> {
   let updated = 0;
   let removed = 0;

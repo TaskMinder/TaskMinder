@@ -8,7 +8,7 @@ import { invalidateCache } from "../config/redis.js";
 import socketIO from "../config/socket.js";
 import { encryptionManager } from "./encryption.manager.js";
 
-// resolved reports are kept this long, so an appeal can be checked against content and decision
+// resolved reports are kept for appeals
 const RESOLVED_REPORT_RETENTION_MONTHS = 6;
 
 /**
@@ -124,7 +124,7 @@ export async function cleanupDeletedAccounts(): Promise<void> {
   }
 }
 
-// open reports have no resolvedAt and are kept until decided
+// open reports are kept until decided
 export async function cleanupModerationRecords(): Promise<void> {
   try {
     const cutoffDate = new Date();
